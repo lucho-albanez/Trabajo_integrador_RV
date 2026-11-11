@@ -1,0 +1,70 @@
+[gd_scene load_steps=8 format=3 uid="uid://df728s9j2a101"]
+
+[ext_resource type="Script" path="res://scripts/ArcSimulator.gd" id="1_arc"]
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleMat_Sparks"]
+emission_shape = 1
+emission_sphere_radius = 0.005
+direction = Vector3(0, 1, 0)
+spread = 65.0
+initial_velocity_min = 1.2
+initial_velocity_max = 2.8
+gravity = Vector3(0, -9.8, 0)
+scale_min = 0.003
+scale_max = 0.006
+
+[sub_resource type="StandardMaterial3D" id="Mat_Sparks"]
+albedo_color = Color(1, 0.7, 0.2, 1)
+emission_enabled = true
+emission = Color(1, 0.6, 0.1, 1)
+emission_energy_multiplier = 4.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_Spark"]
+material = SubResource("Mat_Sparks")
+size = Vector3(0.004, 0.004, 0.004)
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleMat_Smoke"]
+direction = Vector3(0, 1, 0)
+spread = 20.0
+initial_velocity_min = 0.2
+initial_velocity_max = 0.6
+gravity = Vector3(0, 0.2, 0)
+scale_min = 0.02
+scale_max = 0.06
+
+[sub_resource type="StandardMaterial3D" id="Mat_Smoke"]
+transparency = 1
+albedo_color = Color(0.5, 0.5, 0.5, 0.3)
+roughness = 0.9
+
+[sub_resource type="SphereMesh" id="SphereMesh_Smoke"]
+material = SubResource("Mat_Smoke")
+radius = 0.02
+height = 0.04
+
+[node name="ArcVFX" type="Node3D" node_paths=PackedStringArray("arc_light", "sparks_particles", "smoke_particles")]
+script = ExtResource("1_arc")
+arc_light = NodePath("ArcLight")
+sparks_particles = NodePath("SparksParticles")
+smoke_particles = NodePath("SmokeParticles")
+
+[node name="ArcLight" type="OmniLight3D" parent="."]
+light_color = Color(0.85, 0.95, 1, 1)
+light_energy = 8.0
+omni_range = 3.5
+omni_attenuation = 1.5
+
+[node name="SparksParticles" type="GPUParticles3D" parent="."]
+emitting = false
+amount = 40
+lifetime = 0.6
+randomness = 0.5
+process_material = SubResource("ParticleMat_Sparks")
+draw_pass_1 = SubResource("BoxMesh_Spark")
+
+[node name="SmokeParticles" type="GPUParticles3D" parent="."]
+emitting = false
+amount = 16
+lifetime = 1.2
+process_material = SubResource("ParticleMat_Smoke")
+draw_pass_1 = SubResource("SphereMesh_Smoke")

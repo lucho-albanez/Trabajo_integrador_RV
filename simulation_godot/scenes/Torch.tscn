@@ -1,0 +1,44 @@
+[gd_scene load_steps=6 format=3 uid="uid://b7qm8v3pxw0ly"]
+
+[ext_resource type="Script" path="res://scripts/TorchController.gd" id="1_torch"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_Handle"]
+albedo_color = Color(0.12, 0.12, 0.13, 1)
+roughness = 0.8
+
+[sub_resource type="CylinderMesh" id="Mesh_Handle"]
+material = SubResource("Mat_Handle")
+top_radius = 0.02
+bottom_radius = 0.02
+height = 0.18
+
+[sub_resource type="StandardMaterial3D" id="Mat_Electrode"]
+albedo_color = Color(0.45, 0.46, 0.48, 1)
+metallic = 0.7
+roughness = 0.5
+
+[sub_resource type="CylinderMesh" id="Mesh_Electrode"]
+material = SubResource("Mat_Electrode")
+top_radius = 0.0025
+bottom_radius = 0.0025
+height = 0.2
+
+[node name="TorchRig" type="Node3D" node_paths=PackedStringArray("electrode_mesh", "electrode_tip_marker")]
+script = ExtResource("1_torch")
+electrode_mesh = NodePath("Electrode")
+electrode_tip_marker = NodePath("Electrode/ElectrodeTip")
+
+[node name="Handle" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 0, 0)
+mesh = SubResource("Mesh_Handle")
+
+[node name="Jaws" type="MeshInstance3D" parent="Handle"]
+transform = Transform3D(0.04, 0, 0, 0, 0.04, 0, 0, 0, 0.05, 0, 0.09, 0)
+mesh = SubResource("Mesh_Handle")
+
+[node name="Electrode" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.707107, -0.707107, 0, 0.707107, 0.707107, 0, 0.08, -0.08)
+mesh = SubResource("Mesh_Electrode")
+
+[node name="ElectrodeTip" type="Marker3D" parent="Electrode"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
