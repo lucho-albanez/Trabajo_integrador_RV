@@ -1,0 +1,60 @@
+[gd_scene format=3 uid="uid://dqj31l4xoous"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_6jqwh"]
+size = Vector3(0.08, 0.4, 0.35)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_6jqwh"]
+albedo_color = Color(0, 0, 0, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_k0h2g"]
+material = SubResource("StandardMaterial3D_6jqwh")
+top_radius = 0.02
+bottom_radius = 0.02
+height = 0.25
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_00eda"]
+albedo_color = Color(0.7983165, 0.41089162, 0.1678085, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_iismu"]
+material = SubResource("StandardMaterial3D_00eda")
+size = Vector3(0.04, 0.05, 0.06)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_2ckh1"]
+albedo_color = Color(0.4075654, 0.40756536, 0.40756533, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_abf0k"]
+material = SubResource("StandardMaterial3D_2ckh1")
+top_radius = 0.01
+bottom_radius = 0.01
+height = 0.35
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_k0h2g"]
+size = Vector3(0.3, 0.5, 0.45)
+
+[node name="ElectrodeHolder" type="RigidBody3D" unique_id=348951073 groups=["interactable"]]
+continuous_cd = true
+
+[node name="CablePoint" type="Marker3D" parent="." unique_id=128491023]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.16)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1828235137]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0008544922, 0.16349792, -0.0029296875)
+shape = SubResource("BoxShape3D_6jqwh")
+
+[node name="Handle" type="MeshInstance3D" parent="." unique_id=2103984047]
+transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, 0, 1.4479397e-09, -0.033125)
+mesh = SubResource("CylinderMesh_k0h2g")
+
+[node name="Head" type="MeshInstance3D" parent="." unique_id=1601681181]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.11985576)
+mesh = SubResource("BoxMesh_iismu")
+
+[node name="Electrode" type="MeshInstance3D" parent="." unique_id=758930411]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.17703193, 0.11913997)
+mesh = SubResource("CylinderMesh_abf0k")
+
+[node name="InteractArea" type="Area3D" parent="." unique_id=1008028079]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="InteractArea" unique_id=126232190]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7.6293945e-05, 0.00039705634, -0.004135132)
+shape = SubResource("BoxShape3D_k0h2g")

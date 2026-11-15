@@ -1,0 +1,93 @@
+[gd_scene format=3 uid="uid://dslhv6xr3nryg"]
+
+[ext_resource type="PackedScene" uid="uid://qypw5hultsvi" path="res://Scenes/Player.tscn" id="2_myuec"]
+[ext_resource type="PackedScene" uid="uid://d1uvyi56hiqic" path="res://Scenes/welding_machine.tscn" id="3_rtcas"]
+[ext_resource type="PackedScene" uid="uid://dqj31l4xoous" path="res://Scenes/electrode_holder.tscn" id="4_c2lxa"]
+[ext_resource type="PackedScene" uid="uid://bwa6n2byqd7p6" path="res://Scenes/ground_clamp.tscn" id="5_g8hvo"]
+[ext_resource type="PackedScene" uid="uid://5smnbtc4oogg" path="res://Scenes/Table.tscn" id="6_c2lxa"]
+[ext_resource type="PackedScene" uid="uid://eocefsnx2plo" path="res://Scenes/placa.tscn" id="6_g8hvo"]
+[ext_resource type="Script" uid="uid://btixwcbbdhm6e" path="res://Scripts/welding_cable.gd" id="7_cable"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_rtcas"]
+
+[sub_resource type="Sky" id="Sky_kmpvh"]
+sky_material = SubResource("ProceduralSkyMaterial_rtcas")
+
+[sub_resource type="Environment" id="Environment_5xha7"]
+background_mode = 2
+sky = SubResource("Sky_kmpvh")
+glow_enabled = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_g8hvo"]
+albedo_color = Color(0.85, 0.35, 0.05, 1)
+roughness = 0.7
+
+[sub_resource type="ImmediateMesh" id="ImmediateMesh_c1"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_btdcq"]
+albedo_color = Color(0.1, 0.1, 0.1, 1)
+roughness = 0.7
+
+[sub_resource type="ImmediateMesh" id="ImmediateMesh_c2"]
+
+[node name="Level1" type="Node3D" unique_id=1601735125]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1980656102]
+environment = SubResource("Environment_5xha7")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1873456366]
+transform = Transform3D(-0.7368501, -0.10571374, 0.66773987, 0.45502943, 0.6529352, 0.60549444, -0.49999997, 0.7499999, -0.43301263, 0, 18.016638, -3.0138528)
+light_color = Color(1, 0.8862745, 0.7254902, 1)
+shadow_enabled = true
+
+[node name="CharacterBody3D" parent="." unique_id=1706901506 instance=ExtResource("2_myuec")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.184128, -3.6768854)
+
+[node name="CSGBox3D" type="CSGBox3D" parent="." unique_id=1833078560]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7.69011, 3.8706665, -0.79455566)
+use_collision = true
+size = Vector3(1, 7.9991455, 28.954346)
+
+[node name="CSGBox3D2" type="CSGBox3D" parent="." unique_id=443173671]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.1268582, -0.26180792, -0.88975143)
+use_collision = true
+size = Vector3(35.387543, 0.48876953, 31.31128)
+
+[node name="WeldingMachine" parent="." unique_id=1671227931 instance=ExtResource("3_rtcas")]
+transform = Transform3D(-4.371139e-08, 0, -1, 0, 1, 0, 1, 0, -4.371139e-08, 4.933, 1.2320248, -0.847)
+
+[node name="GroundClamp" parent="." unique_id=336341614 instance=ExtResource("5_g8hvo")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.6314974, 1.0698693, 0)
+continuous_cd = false
+
+[node name="ElectrodeHolder" parent="." unique_id=348951073 instance=ExtResource("4_c2lxa")]
+transform = Transform3D(-4.371139e-08, -1, -8.742278e-08, -1, 4.371139e-08, 3.821371e-15, 0, 8.742278e-08, -1, 4.971889, 1.1134105, 0.61700225)
+continuous_cd = false
+
+[node name="Table" parent="." unique_id=262214508 instance=ExtResource("6_c2lxa")]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 4.857, 0.5, 2.102)
+
+[node name="Table2" parent="." unique_id=1474433570 instance=ExtResource("6_c2lxa")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 6.279)
+
+[node name="Placa" parent="." unique_id=1185034663 instance=ExtResource("6_g8hvo")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0771004, 1.0924973, 6.2790365)
+
+[node name="Placa2" parent="." unique_id=1790491026 instance=ExtResource("6_g8hvo")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.098809, 1.0924973, 6.2790365)
+
+[node name="CableElectrode" type="MeshInstance3D" parent="." unique_id=470166034]
+material_override = SubResource("StandardMaterial3D_g8hvo")
+mesh = SubResource("ImmediateMesh_c1")
+script = ExtResource("7_cable")
+start_node_path = NodePath("../WeldingMachine/FrontPanel/TerminalPos")
+end_node_path = NodePath("../ElectrodeHolder/CablePoint")
+sag_factor = 0.4
+cable_color = Color(0.85, 0.35, 0.05, 1)
+
+[node name="CableGround" type="MeshInstance3D" parent="." unique_id=1444250271]
+material_override = SubResource("StandardMaterial3D_btdcq")
+mesh = SubResource("ImmediateMesh_c2")
+script = ExtResource("7_cable")
+start_node_path = NodePath("../WeldingMachine/FrontPanel/TerminalNeg")
+end_node_path = NodePath("../GroundClamp/CablePoint")
