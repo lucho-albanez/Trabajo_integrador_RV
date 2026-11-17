@@ -1,0 +1,479 @@
+class_name ExerciseController
+extends Node
+## Orquesta el ejercicio de soldadura: preparación del equipo, calibración,
+## soldadura (arco, cordón, consumo del electrodo, retroalimentación) e informe.
+##
+## Fases:  SETUP -> CALIBRATING -> WELDING -> FINISHED
+##
+## Es el único lugar que conecta la herramienta (DeviceLink) con el mundo
+## virtual: calcula la pose del portaelectrodo a partir de la orientación, la
+## distancia y el desplazamiento medidos, y alimenta el simulador del arco, el
+## evaluador, el cordón, los efectos y la háptica.
+
+signal state_changed(new_state: int)
+signal exercise_finished(report: Dictionary)
+
+enum State { SETUP, CALIBRATING, WELDING, FINISHED }
+
+const SPEED_SMOOTH_TAU_S := 0.25
+const SPEED_VALID_AFTER_S := 0.5
+const NOMINAL_SPEED_MM_S := 3.0
+const CALIBRATION_TIME_S := 1.5
+const VISUAL_GAP_MAX_MM := 30.0
+const END_MARGIN_MM := 1.0
+
+@export var player: Player
+@export var machine: WeldingMachine
+@export var ground_clamp: GroundClamp
+@export var holder: ElectrodeHolder
+@export var spot: WeldingSpot
+@export var coupon: Coupon
+@export var hud: Hud
+@export var report_window: ReportWindow
+
+var state: int = State.SETUP
+var level: LevelConfig
+var arc: ArcSimulator
+var evaluator: WeldEvaluator
+var report: Dictionary = {}
+
+var _haptics: HapticController
+var _vfx: ArcVFX
+var _s_mm: float = 0.0
+var _v_mm: float = 0.0
+var _speed_smooth: float = 0.0
+var _angles: Vector2 = Vector2.ZERO
+var _away_dir: Vector3 = Vector3.FORWARD
+var _weld_time: float = 0.0
+var _electrode_used_mm: float = 0.0
+var _current_a: float = 0.0
+var _was_mask_violation: bool = false
+var _last_depleted_msg_msec: int = 0
+
+
+func _ready() -> void:
+	level = LevelConfig.create(Game.selected_level)
+	coupon.seam_length_mm = LevelConfig.SEAM_LENGTH_MM
+	coupon.bead.reset(LevelConfig.SEAM_LENGTH_MM)
+
+	evaluator = WeldEvaluator.new()
+	arc = ArcSimulator.new()
+	arc.name = "ArcSimulator"
+	add_child(arc)
+	arc.state_changed.connect(_on_arc_state_changed)
+	arc.strike_failed.connect(_on_strike_failed)
+
+	_haptics = HapticController.new()
+	_haptics.name = "HapticController"
+	add_child(_haptics)
+	_haptics.setup(arc)
+
+	_vfx = ArcVFX.new()
+	_vfx.name = "ArcVFX"
+	add_child(_vfx)
+
+	hud.setup(level)
+	hud.pause_requested.connect(_set_paused.bind(true))
+	hud.resume_requested.connect(_set_paused.bind(false))
+	hud.restart_requested.connect(func() -> void: Game.start_level(level.id))
+	hud.menu_requested.connect(Game.go_to_menu)
+	report_window.retry_requested.connect(func() -> void: Game.start_level(level.id))
+	report_window.next_requested.connect(func() -> void: Game.start_level(level.id + 1))
+	report_window.menu_requested.connect(Game.go_to_menu)
+
+	ground_clamp.clamped_changed.connect(func(c: bool) -> void: spot.set_active(c))
+	spot.set_active(ground_clamp.is_clamped)
+	DeviceLink.connection_changed.connect(_on_link_changed)
+	DeviceLink.sim_capture = false
+
+	var flat := spot.look_target.global_position - spot.stand_point.global_position
+	flat.y = 0.0
+	_away_dir = flat.normalized() if flat.length() > 0.001 else Vector3.FORWARD
+
+	_set_state(State.SETUP)
+	hud.show_message("%s - preparate: encendé la máquina, conectá la pinza y tomá el portaelectrodo." % level.display_name, 5.0)
+
+
+func _exit_tree() -> void:
+	DeviceLink.sim_capture = false
+	DeviceLink.test_trigger = false
+	DeviceLink.stop_haptics()
+	get_tree().paused = false
+
+
+# ---------------------------------------------------------------------------
+# Entrada
+# ---------------------------------------------------------------------------
+
+func _unhandled_input(event: InputEvent) -> void:
+	if get_tree().paused:
+		return
+	if event.is_action_pressed("toggle_input_source"):
+		DeviceLink.cycle_input_mode()
+		hud.show_message("Fuente de entrada: " + DeviceLink.source_name(), 2.0)
+	elif event.is_action_pressed("calibrate"):
+		DeviceLink.tare_pose()
+		hud.show_message("Pose neutra recalibrada", 1.5)
+	elif event.is_action_pressed("reset_yaw"):
+		DeviceLink.reset_yaw()
+		hud.show_message("Orientación (yaw) reiniciada", 1.5)
+	elif event.is_action_pressed("replace_electrode"):
+		_try_replace_electrode()
+	elif event.is_action_pressed("start_exercise") and state == State.SETUP:
+		start_exercise()
+	elif event.is_action_pressed("finish_exercise") and state == State.WELDING:
+		finish_exercise()
+
+
+func _set_paused(paused: bool) -> void:
+	if state == State.FINISHED:
+		return
+	get_tree().paused = paused
+	hud.show_pause(paused)
+	if paused:
+		DeviceLink.sim_capture = false
+		DeviceLink.stop_haptics()
+		player.capture_mouse(false)
+	else:
+		DeviceLink.sim_capture = state == State.WELDING
+		player.capture_mouse(true)
+
+
+func _on_link_changed(connected: bool) -> void:
+	hud.show_message("Herramienta física conectada" if connected else "Herramienta física desconectada", 2.5)
+
+
+# ---------------------------------------------------------------------------
+# Estados
+# ---------------------------------------------------------------------------
+
+func _set_state(new_state: int) -> void:
+	state = new_state
+	match state:
+		State.SETUP:
+			hud.set_phase("1/3  Preparación del equipo")
+			hud.set_checklist_visible(true)
+			hud.set_gauges_visible(false)
+			hud.set_crosshair_visible(true)
+			hud.set_help("WASD mover  |  E interactuar  |  Q careta  |  C agacharse  |  Esc pausa")
+		State.CALIBRATING:
+			hud.set_phase("2/3  Calibración")
+			hud.set_checklist_visible(false)
+			hud.set_crosshair_visible(false)
+			hud.set_prompt("")
+			hud.set_help("")
+		State.WELDING:
+			hud.set_phase("3/3  Soldadura")
+			hud.set_gauges_visible(true)
+			hud.set_help("Q careta  |  clic izq. / gatillo: arco  |  mouse: avanzar  |  rueda: distancia  |  A/D W/S: ángulos  |  R electrodo  |  T recalibrar  |  Enter terminar")
+		State.FINISHED:
+			hud.set_phase("Ejercicio finalizado")
+			hud.set_gauges_visible(false)
+			hud.set_help("")
+	state_changed.emit(state)
+
+
+## Devuelve los requisitos que faltan para comenzar (vacío si está todo listo).
+func missing_requirements() -> Array[String]:
+	var missing: Array[String] = []
+	if not machine.is_on:
+		missing.append("Encender la máquina de soldar")
+	if not ground_clamp.is_clamped:
+		missing.append("Conectar la pinza de masa a la mesa")
+	if not holder.is_held:
+		missing.append("Tomar el portaelectrodo")
+	if spot.is_active and not spot.contains(player):
+		missing.append("Pararte sobre la marca amarilla")
+	elif not spot.is_active:
+		missing.append("Pararte sobre la marca amarilla (aparece al conectar la pinza)")
+	return missing
+
+
+func start_exercise() -> void:
+	if state != State.SETUP:
+		return
+	var missing := missing_requirements()
+	if not missing.is_empty():
+		hud.show_message("Falta: " + missing[0], 2.5)
+		return
+	_run_calibration()
+
+
+func _run_calibration() -> void:
+	_set_state(State.CALIBRATING)
+	_current_a = float(machine.current_amperage)
+	var tween := player.enter_station(spot)
+	await tween.finished
+	hud.show_message("Sostené la herramienta quieta en posición neutra (perpendicular a la chapa)...", CALIBRATION_TIME_S + 0.5)
+	await get_tree().create_timer(CALIBRATION_TIME_S).timeout
+	DeviceLink.tare_pose()
+	_begin_welding()
+
+
+func _begin_welding() -> void:
+	evaluator.setup(level, _current_a)
+	arc.reset()
+	_s_mm = 0.0
+	_v_mm = 0.0
+	_speed_smooth = 0.0
+	_weld_time = 0.0
+	_electrode_used_mm = 0.0
+	holder.top_level = true
+	DeviceLink.consume_travel_mm()  # descarta el movimiento acumulado
+	DeviceLink.sim_capture = true
+	_set_state(State.WELDING)
+	_place_holder(INF)
+	hud.show_message("Bajá la careta (Q), acercá la punta a la chapa y mantené el clic izquierdo (o el botón) para cebar el arco.", 6.0)
+
+
+func finish_exercise() -> void:
+	if state != State.WELDING:
+		return
+	arc.force_off("finished")
+	_apply_feedback(false, 0.0)
+	DeviceLink.sim_capture = false
+	DeviceLink.test_trigger = false
+	DeviceLink.stop_haptics()
+	player.mask_hud.set_arc(false)
+	player.mask_hud.set_down(false)
+
+	report = evaluator.finalize({
+		"coverage": coupon.bead.coverage(),
+		"bead_length_mm": coupon.bead.length_mm(),
+		"electrode_used_mm": _electrode_used_mm,
+		"duration_s": _weld_time,
+	})
+	(report["stats"] as Dictionary)["interruptions"] = coupon.bead.interruptions()
+	Game.last_report = report
+	_set_state(State.FINISHED)
+	report_window.show_report(report, level.id < LevelConfig.LEVEL_COUNT)
+	exercise_finished.emit(report)
+
+
+# ---------------------------------------------------------------------------
+# Bucle principal
+# ---------------------------------------------------------------------------
+
+func _process(_delta: float) -> void:
+	match state:
+		State.SETUP:
+			_update_setup_ui()
+		State.WELDING:
+			_update_welding_ui()
+
+
+func _physics_process(delta: float) -> void:
+	if state == State.WELDING:
+		_step_welding(delta)
+
+
+func _update_setup_ui() -> void:
+	var items: Array = []
+	items.append({"text": "Encender la máquina de soldar", "done": machine.is_on})
+	var amp_text := "Regular el amperaje"
+	if level.show_current_hint:
+		amp_text += " (%.0f-%.0f A)" % [level.current_band.x, level.current_band.y]
+	var amp_ok := machine.is_on and float(machine.current_amperage) >= level.current_band.x \
+		and float(machine.current_amperage) <= level.current_band.y
+	items.append({"text": amp_text, "done": amp_ok})
+	items.append({"text": "Conectar la pinza de masa a la mesa", "done": ground_clamp.is_clamped})
+	items.append({"text": "Tomar el portaelectrodo", "done": holder.is_held})
+	items.append({"text": "Pararte sobre la marca amarilla", "done": spot.contains(player)})
+	hud.set_checklist(items)
+
+	var prompt := player.interactor.get_prompt()
+	if prompt.is_empty() and missing_requirements().is_empty():
+		prompt = "[F] Comenzar el ejercicio"
+	hud.set_prompt(prompt)
+	hud.set_amperage(float(machine.current_amperage), machine.is_on)
+	hud.set_electrode(holder.remaining_fraction(), holder.length_mm, holder.electrodes_used)
+	hud.set_progress(0.0, 0.0)
+
+
+func _update_welding_ui() -> void:
+	var gap := DeviceLink.get_arc_gap_mm()
+	hud.update_gauges(gap if is_finite(gap) else 0.0, is_finite(gap), _speed_smooth, _angles.x, _angles.y)
+	hud.set_amperage(_current_a, true)
+	hud.set_electrode(holder.remaining_fraction(), holder.length_mm, holder.electrodes_used)
+	hud.set_progress(clampf(_s_mm / coupon.seam_length_mm, 0.0, 1.0), coupon.bead.coverage())
+
+	match arc.state:
+		ArcSimulator.State.ARCING:
+			match arc.zone:
+				ArcSimulator.Zone.SHORT:
+					hud.set_arc_state("ARCO CORTO", Hud.COLOR_WARN)
+				ArcSimulator.Zone.LONG:
+					hud.set_arc_state("ARCO LARGO", Hud.COLOR_WARN)
+				_:
+					hud.set_arc_state("ARCO ESTABLE", Hud.COLOR_OK)
+		ArcSimulator.State.STUCK:
+			hud.set_arc_state("ELECTRODO PEGADO", Hud.COLOR_BAD)
+		ArcSimulator.State.OUT:
+			hud.set_arc_state("ARCO APAGADO", Hud.COLOR_BAD)
+		_:
+			hud.set_arc_state("Sin arco", Hud.COLOR_PENDING)
+
+	if _s_mm >= coupon.seam_length_mm - END_MARGIN_MM:
+		hud.set_prompt("Llegaste al final de la junta - [Enter] para terminar")
+	elif holder.is_depleted():
+		hud.set_prompt("Electrodo agotado - [R] para colocar uno nuevo")
+	else:
+		hud.set_prompt("")
+
+
+func _step_welding(delta: float) -> void:
+	_weld_time += delta
+
+	# 1) Lectura de la herramienta.
+	var travel := Vector2.ZERO
+	if arc.state != ArcSimulator.State.STUCK:  # pegado a la chapa no se puede avanzar
+		travel = DeviceLink.consume_travel_mm()
+	else:
+		DeviceLink.consume_travel_mm()
+	var prev_s := _s_mm
+	var prev_v := _v_mm
+	_s_mm = clampf(_s_mm + travel.x, -coupon.plate_margin_mm, coupon.seam_length_mm + coupon.plate_margin_mm)
+	_v_mm = clampf(_v_mm + travel.y, -coupon.plate_half_width_mm, coupon.plate_half_width_mm)
+	var moved_s := absf(_s_mm - prev_s)
+	var inst_speed := moved_s / delta
+	_speed_smooth = lerpf(_speed_smooth, inst_speed, 1.0 - exp(-delta / SPEED_SMOOTH_TAU_S))
+
+	var up := DeviceLink.get_tool_up()
+	_angles = WeldGeometry.angles_from_up(up)
+	var gap := DeviceLink.get_arc_gap_mm()
+	var trigger := DeviceLink.get_trigger()
+	var energized := machine.is_on and ground_clamp.is_clamped
+	var over_plate := coupon.is_over_plate(_s_mm, _v_mm)
+
+	if holder.is_depleted():
+		if trigger and arc.state == ArcSimulator.State.OFF:
+			var now := Time.get_ticks_msec()
+			if now - _last_depleted_msg_msec > 2000:
+				_last_depleted_msg_msec = now
+				hud.show_message("Electrodo agotado: presioná R para colocar uno nuevo", 2.5)
+		trigger = false
+
+	# 2) Simulación del arco.
+	arc.step(delta, trigger, gap, energized, over_plate)
+	var arcing := arc.state == ArcSimulator.State.ARCING
+
+	# 3) Proceso de soldadura.
+	if arcing:
+		_weld_step(delta, prev_s, prev_v, gap)
+	_apply_feedback(arcing, gap)
+
+	# 4) Pose del portaelectrodo virtual.
+	_place_holder(gap)
+
+
+func _weld_step(delta: float, prev_s: float, prev_v: float, gap: float) -> void:
+	# Consumo del electrodo (el operario no necesita compensarlo: la punta
+	# virtual sigue la distancia medida).
+	var burn := WeldPhysics.burn_rate_mm_s(_current_a) * delta * level.consumption_scale
+	_electrode_used_mm += holder.consume(burn)
+	if holder.is_depleted():
+		arc.force_off("depleted")
+		hud.show_message("Electrodo agotado: presioná R para colocar uno nuevo", 3.0)
+		return
+
+	# Velocidad física: arranca desde un valor nominal para no castigar el cebado.
+	var speed_phys := _speed_smooth
+	if arc.time_in_arc < SPEED_VALID_AFTER_S:
+		speed_phys = lerpf(NOMINAL_SPEED_MM_S, _speed_smooth, arc.time_in_arc / SPEED_VALID_AFTER_S)
+
+	var width := WeldPhysics.bead_width_mm(_current_a, speed_phys, gap)
+	var height := WeldPhysics.bead_height_mm(_current_a, speed_phys, width)
+	var pen := WeldPhysics.penetration_mm(_current_a, speed_phys, gap, _angles.y)
+	var undercut := WeldPhysics.undercut_mm(_current_a, speed_phys)
+
+	evaluator.add_sample(delta, {
+		"arc_len": gap,
+		"speed": _speed_smooth if arc.time_in_arc >= SPEED_VALID_AFTER_S else -1.0,
+		"work": _angles.x,
+		"travel": _angles.y,
+		"lateral": _v_mm,
+		"width": width,
+		"height": height,
+		"penetration": pen,
+		"undercut": undercut,
+	})
+	var defect := undercut > 1.0 or gap > WeldPhysics.OPTIMAL_GAP_MAX_MM + 1.5
+	coupon.bead.deposit_span(prev_s, prev_v, _s_mm, _v_mm, width, height, defect)
+
+	if not player.mask_hud.is_down:
+		evaluator.add_safety_time(delta)
+		if not _was_mask_violation:
+			_was_mask_violation = true
+			Events.safety_violation.emit()
+			hud.show_message("¡Soldando sin careta! Bajá la careta (Q)", 2.5)
+	else:
+		_was_mask_violation = false
+
+
+## Efectos, careta y háptica según el estado del arco.
+func _apply_feedback(arcing: bool, gap: float) -> void:
+	var stuck := arc.state == ArcSimulator.State.STUCK
+	var tip := _tip_global(gap)
+	_vfx.global_position = tip + coupon.global_transform.basis.y * 0.004
+	_vfx.set_active(arcing, gap if is_finite(gap) else 2.5, _current_a)
+	_vfx.set_stuck(stuck)
+	player.mask_hud.set_arc(arcing or stuck)
+	var out_of_tolerance := absf(_angles.x) > level.work_band.y \
+		or _angles.y < level.travel_band.x or _angles.y > level.travel_band.y
+	_haptics.set_warning(out_of_tolerance)
+
+
+func _tip_global(gap: float) -> Vector3:
+	var h := clampf(gap, 0.0, VISUAL_GAP_MAX_MM) if is_finite(gap) else VISUAL_GAP_MAX_MM
+	return coupon.seam_to_global(_s_mm, _v_mm, h)
+
+
+## Coloca el portaelectrodo para que su punta quede en la posición virtual.
+func _place_holder(gap: float) -> void:
+	var up_global := coupon.global_transform.basis * DeviceLink.get_tool_up()
+	var basis := WeldGeometry.holder_basis(-up_global, _away_dir)
+	var tip := _tip_global(gap)
+	holder.global_transform = Transform3D(basis, tip - basis * holder.get_tip_local())
+
+
+func _try_replace_electrode() -> void:
+	if not holder.is_held:
+		hud.show_message("Tomá el portaelectrodo para cambiar el electrodo", 2.0)
+		return
+	if state == State.WELDING and arc.state != ArcSimulator.State.OFF:
+		return
+	if holder.length_mm >= holder.initial_length_mm - 0.5:
+		hud.show_message("El electrodo está nuevo", 1.5)
+		return
+	holder.replace_electrode()
+	hud.show_message("Electrodo nuevo colocado (#%d)" % holder.electrodes_used, 2.0)
+
+
+# ---------------------------------------------------------------------------
+# Eventos del arco
+# ---------------------------------------------------------------------------
+
+func _on_arc_state_changed(new_state: int, reason: String) -> void:
+	match new_state:
+		ArcSimulator.State.ARCING:
+			_speed_smooth = 0.0
+			_was_mask_violation = false
+		ArcSimulator.State.STUCK:
+			evaluator.add_stick_event()
+			hud.show_message("¡Electrodo pegado! Alejá la herramienta de la chapa (más de 2,5 mm)", 3.0)
+		ArcSimulator.State.OUT:
+			evaluator.add_out_event()
+			hud.show_message("Arco apagado: te separaste demasiado. Soltá el gatillo y cebá de nuevo.", 3.0)
+		ArcSimulator.State.OFF:
+			if reason == "freed":
+				hud.show_message("Electrodo liberado. Soltá el gatillo y cebá de nuevo.", 2.5)
+
+
+func _on_strike_failed(reason: String) -> void:
+	match reason:
+		"no_circuit":
+			hud.show_message("Sin corriente: encendé la máquina y conectá la pinza de masa", 2.5)
+		"off_plate":
+			hud.show_message("Apuntá a la probeta para cebar el arco", 2.0)
+		"too_far":
+			hud.show_message("Muy lejos para cebar: acercate a menos de 4,5 mm", 2.0)

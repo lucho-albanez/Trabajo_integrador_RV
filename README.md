@@ -204,3 +204,15 @@ ArcSim_VR/
 * `{"cmd":"CALIBRATE"}`: Ejecuta calibración de offsets estáticos en reposo.
 * `{"cmd":"RESET_YAW"}`: Ajusta el ángulo Yaw a $0.0^\circ$.
 * `{"cmd":"SET_HAPTIC","val":255}`: Fuerza vibración háptica al 100% (electrodo pegado).
+
+## Simulador (Godot) - guía rápida
+
+Abrir `simulacion_godot/trabajo-final-rv` con Godot 4.7 y ejecutar (F5). Menú -> elegir nivel (1-3).
+
+**Flujo:** encender la máquina (E sobre el interruptor) -> ajustar amperaje (rueda sobre la perilla) -> tomar la pinza y engancharla a la mesa (E) -> tomar el portaelectrodo -> pararse en la marca amarilla -> **F** para comenzar -> bajar la careta (**Q**) -> clic izquierdo/botón = arco -> **Enter** para terminar y ver el informe.
+
+**Entrada simulada (sin hardware):** mouse = avance, rueda = distancia punta-chapa, A/D = ángulo de trabajo, W/S = ángulo de avance. **T** recalibra la pose neutra, **Tab** cambia la fuente (auto/simulada/herramienta), **R** cambia el electrodo, **Esc** pausa.
+
+**Herramienta física:** el firmware envía JSON por USB; correr `python simulacion_godot/trabajo-final-rv/tools/serial_bridge.py` (requiere `pip install pyserial`) para reenviarlo por UDP al puerto 4242. `--mock` genera telemetría sintética. Campos opcionales nuevos: `dx,dy` (desplazamiento en mm si hay sensor de posición) y comando `SET_HAPTIC` con `m` (motor 0/1).
+
+**Pruebas automáticas:** `godot --headless --fixed-fps 60 res://tests/test_runner.tscn` (desde la carpeta del proyecto).

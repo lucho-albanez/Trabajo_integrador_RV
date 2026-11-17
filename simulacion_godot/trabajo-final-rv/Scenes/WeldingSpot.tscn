@@ -1,0 +1,40 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://Scripts/world/welding_spot.gd" id="1_spot"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_zone"]
+size = Vector3(0.9, 1.0, 0.9)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pad"]
+transparency = 1
+albedo_color = Color(1, 0.85, 0.05, 0.85)
+emission_enabled = true
+emission = Color(1, 0.85, 0, 1)
+emission_energy_multiplier = 2.5
+
+[sub_resource type="BoxMesh" id="BoxMesh_pad"]
+size = Vector3(0.8, 0.01, 0.8)
+
+[node name="WeldingSpot" type="Area3D" node_paths=PackedStringArray("pad_mesh", "stand_point", "look_target", "head_point")]
+script = ExtResource("1_spot")
+pad_mesh = NodePath("PadMesh")
+stand_point = NodePath("StandPoint")
+look_target = NodePath("LookTarget")
+head_point = NodePath("HeadPoint")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0, 0, 0.5, 0)
+shape = SubResource("BoxShape3D_zone")
+
+[node name="PadMesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0, 0, 0.006, 0)
+material_override = SubResource("StandardMaterial3D_pad")
+mesh = SubResource("BoxMesh_pad")
+
+[node name="StandPoint" type="Marker3D" parent="."]
+
+[node name="LookTarget" type="Marker3D" parent="."]
+transform = Transform3D(1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0, 0, 0.91, 0.65)
+
+[node name="HeadPoint" type="Marker3D" parent="."]
+transform = Transform3D(1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0, 0, 1.18, 0.43)

@@ -1,60 +1,61 @@
-[gd_scene format=3 uid="uid://bwa6n2byqd7p6"]
+[gd_scene format=3]
 
-[sub_resource type="BoxShape3D" id="BoxShape3D_k0h2g"]
+[ext_resource type="Script" path="res://Scripts/interaction/ground_clamp.gd" id="1_clamp"]
+[ext_resource type="Script" path="res://Scripts/interaction/interactable.gd" id="2_interactable"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(0.06, 0.16, 0.2)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_00eda"]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_metal"]
 albedo_color = Color(0.7983165, 0.41089162, 0.1678085, 1)
 metallic = 0.8
 roughness = 0.3
 
-[sub_resource type="BoxMesh" id="BoxMesh_k0h2g"]
-material = SubResource("StandardMaterial3D_00eda")
+[sub_resource type="BoxMesh" id="BoxMesh_jaw"]
+material = SubResource("StandardMaterial3D_metal")
 size = Vector3(0.02, 0.03, 0.16)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_iismu"]
-albedo_color = Color(0.7983165, 0.41089162, 0.1678085, 1)
-metallic = 0.8
-roughness = 0.3
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_black"]
+albedo_color = Color(0.02, 0.02, 0.02, 1)
 
-[sub_resource type="BoxMesh" id="BoxMesh_6jqwh"]
-material = SubResource("StandardMaterial3D_iismu")
-size = Vector3(0.02, 0.03, 0.16)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_kv60n"]
-albedo_color = Color(0, 0, 0, 1)
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_abf0k"]
-material = SubResource("StandardMaterial3D_kv60n")
+[sub_resource type="CylinderMesh" id="CylinderMesh_bolt"]
+material = SubResource("StandardMaterial3D_black")
 height = 0.1
 
-[sub_resource type="BoxShape3D" id="BoxShape3D_iismu"]
+[sub_resource type="BoxShape3D" id="BoxShape3D_interact"]
 size = Vector3(0.2, 0.25, 0.3)
 
-[node name="GroundClamp" type="RigidBody3D" unique_id=1818106404 groups=["interactable"]]
+[node name="GroundClamp" type="RigidBody3D"]
+mass = 0.5
 continuous_cd = true
+script = ExtResource("1_clamp")
+display_name = "la pinza de masa"
 
-[node name="CablePoint" type="Marker3D" parent="." unique_id=128491024]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.02, -0.09)
+[node name="CablePoint" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.02, -0.063966274)
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1055001083]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.0013122559, 0.027305603, -0.001953125)
-shape = SubResource("BoxShape3D_k0h2g")
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0273, -0.002)
+shape = SubResource("BoxShape3D_body")
 
-[node name="BodyUpper" type="MeshInstance3D" parent="." unique_id=971648314]
+[node name="BodyUpper" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.9659258, -0.25881904, 0, 0.25881904, 0.9659258, 0, 0, 0)
-mesh = SubResource("BoxMesh_k0h2g")
+mesh = SubResource("BoxMesh_jaw")
 
-[node name="BodyLower" type="MeshInstance3D" parent="." unique_id=1581277214]
-transform = Transform3D(1, 0, 0, 0, 0.9659258, 0.25881904, 0, -0.25881904, 0.9659258, 0, 0.05390472, 0)
-mesh = SubResource("BoxMesh_6jqwh")
+[node name="BodyLower" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.9659258, 0.25881904, 0, -0.25881904, 0.9659258, 0, 0.0539, 0)
+mesh = SubResource("BoxMesh_jaw")
 
-[node name="PivotBolt" type="MeshInstance3D" parent="." unique_id=1514522211]
-transform = Transform3D(-5.7877625e-10, 0.22367764, -5.7877625e-10, 0, -9.77726e-09, -0.013240857, -0.013240857, -9.77726e-09, 2.5299114e-17, 0, 0.026772127, -0.05681999)
-mesh = SubResource("CylinderMesh_abf0k")
+[node name="PivotBolt" type="MeshInstance3D" parent="."]
+transform = Transform3D(0, 0.2237, 0, 0, 0, -0.0132, -0.0132, 0, 0, 0, 0.0268, -0.0568)
+mesh = SubResource("CylinderMesh_bolt")
 
-[node name="InteractArea" type="Area3D" parent="." unique_id=770003533]
+[node name="InteractArea" type="Area3D" parent="." node_paths=PackedStringArray("highlight_root", "pickable")]
+script = ExtResource("2_interactable")
+prompt_text = "Tomar la pinza de masa"
+highlight_root = NodePath("..")
+pickable = NodePath("..")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="InteractArea" unique_id=221135924]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.002532959, 0.024993896, -0.01184082)
-shape = SubResource("BoxShape3D_iismu")
+[node name="CollisionShape3D" type="CollisionShape3D" parent="InteractArea"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.025, -0.012)
+shape = SubResource("BoxShape3D_interact")

@@ -1,0 +1,69 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://Scripts/world/coupon.gd" id="1_coupon"]
+[ext_resource type="Script" path="res://Scripts/welding/weld_bead.gd" id="2_bead"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_plate"]
+size = Vector3(0.18, 0.01, 0.07375)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_steel"]
+albedo_color = Color(0.5, 0.5, 0.53, 1)
+metallic = 0.85
+roughness = 0.42
+
+[sub_resource type="BoxMesh" id="BoxMesh_plate"]
+material = SubResource("StandardMaterial3D_steel")
+size = Vector3(0.18, 0.01, 0.07375)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_green"]
+albedo_color = Color(0.1, 0.9, 0.2, 1)
+emission_enabled = true
+emission = Color(0.1, 0.9, 0.2, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_red"]
+albedo_color = Color(0.95, 0.15, 0.1, 1)
+emission_enabled = true
+emission = Color(0.95, 0.15, 0.1, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_mark_start"]
+material = SubResource("StandardMaterial3D_green")
+size = Vector3(0.0025, 0.0004, 0.06)
+
+[sub_resource type="BoxMesh" id="BoxMesh_mark_end"]
+material = SubResource("StandardMaterial3D_red")
+size = Vector3(0.0025, 0.0004, 0.06)
+
+[node name="Coupon" type="Node3D" node_paths=PackedStringArray("bead")]
+script = ExtResource("1_coupon")
+bead = NodePath("Bead")
+
+[node name="Plates" type="StaticBody3D" parent="."]
+collision_layer = 1
+collision_mask = 0
+
+[node name="ShapeA" type="CollisionShape3D" parent="Plates"]
+transform = Transform3D(1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0, 0, -0.005, -0.03812)
+shape = SubResource("BoxShape3D_plate")
+
+[node name="ShapeB" type="CollisionShape3D" parent="Plates"]
+transform = Transform3D(1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0, 0, -0.005, 0.03812)
+shape = SubResource("BoxShape3D_plate")
+
+[node name="PlateA" type="MeshInstance3D" parent="Plates"]
+transform = Transform3D(1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0, 0, -0.005, -0.03812)
+mesh = SubResource("BoxMesh_plate")
+
+[node name="PlateB" type="MeshInstance3D" parent="Plates"]
+transform = Transform3D(1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0, 0, -0.005, 0.03812)
+mesh = SubResource("BoxMesh_plate")
+
+[node name="StartMark" type="MeshInstance3D" parent="."]
+transform = Transform3D(1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0, -0.0775, 0.0002, 0)
+mesh = SubResource("BoxMesh_mark_start")
+
+[node name="EndMark" type="MeshInstance3D" parent="."]
+transform = Transform3D(1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0, 0.0775, 0.0002, 0)
+mesh = SubResource("BoxMesh_mark_end")
+
+[node name="Bead" type="MeshInstance3D" parent="."]
+script = ExtResource("2_bead")

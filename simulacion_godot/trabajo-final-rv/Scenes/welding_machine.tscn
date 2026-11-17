@@ -1,6 +1,7 @@
-[gd_scene format=3 uid="uid://d1uvyi56hiqic"]
+[gd_scene format=3]
 
-[ext_resource type="Script" uid="uid://bj5rar08l0l77" path="res://Scripts/welding_machine.gd" id="1_script"]
+[ext_resource type="Script" path="res://Scripts/world/welding_machine.gd" id="1_script"]
+[ext_resource type="Script" path="res://Scripts/interaction/interactable.gd" id="2_interactable"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_k0h2g"]
 size = Vector3(0.35351563, 0.5092926, 0.53100586)
@@ -79,61 +80,74 @@ top_radius = 0.018066406
 bottom_radius = 0.018066406
 height = 0.012573242
 
-[node name="WeldingMachine" type="RigidBody3D" unique_id=1161849817]
+[node name="WeldingMachine" type="RigidBody3D" node_paths=PackedStringArray("display_label", "power_led", "knob", "power_interactable", "knob_interactable")]
+freeze = true
 script = ExtResource("1_script")
+display_label = NodePath("FrontPanel/Display/DisplayLabel")
+power_led = NodePath("FrontPanel/PowerLED")
+knob = NodePath("FrontPanel/Knob")
+power_interactable = NodePath("FrontPanel/PowerSwitch/PowerArea")
+knob_interactable = NodePath("FrontPanel/Knob/KnobArea")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=76736095]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.031105042, -0.05)
 shape = SubResource("BoxShape3D_k0h2g")
 
-[node name="Cabinet" type="MeshInstance3D" parent="." unique_id=1392120412]
+[node name="Cabinet" type="MeshInstance3D" parent="."]
 mesh = SubResource("BoxMesh_k0h2g")
 
-[node name="Handle" type="MeshInstance3D" parent="." unique_id=351654356]
+[node name="Handle" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.014007568, 0.25571096, -0.027954102)
 mesh = SubResource("BoxMesh_6jqwh")
 
-[node name="FrontPanel" type="Node3D" parent="." unique_id=38081347]
+[node name="FrontPanel" type="Node3D" parent="."]
 
-[node name="Display" type="MeshInstance3D" parent="FrontPanel" unique_id=505914273]
+[node name="Display" type="MeshInstance3D" parent="FrontPanel"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0017831028, 0.095276594, 0.2614798)
 mesh = SubResource("BoxMesh_00eda")
 
-[node name="DisplayLabel" type="Label3D" parent="FrontPanel/Display" unique_id=1420909955]
+[node name="DisplayLabel" type="Label3D" parent="FrontPanel/Display"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.02273956)
 pixel_size = 0.002
 modulate = Color(1, 0, 0, 1)
 text = "OFF"
 font_size = 39
 
-[node name="Knob" type="MeshInstance3D" parent="FrontPanel" unique_id=1869011749]
+[node name="Knob" type="MeshInstance3D" parent="FrontPanel"]
 transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, -0.1015493, -0.040686876, 0.258933)
 mesh = SubResource("CylinderMesh_k0h2g")
 
-[node name="KnobArea" type="Area3D" parent="FrontPanel/Knob" unique_id=1631099772 groups=["interactable"]]
+[node name="KnobArea" type="Area3D" parent="FrontPanel/Knob" node_paths=PackedStringArray("highlight_root")]
+script = ExtResource("2_interactable")
+prompt_text = "Perilla de amperaje"
+highlight_root = NodePath("..")
+accepts_scroll = true
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="FrontPanel/Knob/KnobArea" unique_id=1166018254]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="FrontPanel/Knob/KnobArea"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0021972656, 0)
 shape = SubResource("CylinderShape3D_k0h2g")
 
-[node name="TerminalPos" type="MeshInstance3D" parent="FrontPanel" unique_id=1837376076]
+[node name="TerminalPos" type="MeshInstance3D" parent="FrontPanel"]
 transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, -0.0056072474, -0.11458716, 0.22270703)
 mesh = SubResource("CylinderMesh_b7qso")
 
-[node name="TerminalNeg" type="MeshInstance3D" parent="FrontPanel" unique_id=1024393397]
+[node name="TerminalNeg" type="MeshInstance3D" parent="FrontPanel"]
 transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, 0.09520215, -0.11458716, 0.22270703)
 mesh = SubResource("CylinderMesh_nc0uj")
 
-[node name="PowerSwitch" type="MeshInstance3D" parent="FrontPanel" unique_id=1873894853]
+[node name="PowerSwitch" type="MeshInstance3D" parent="FrontPanel"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.109692335, -0.17864397, 0.2617675)
 mesh = SubResource("BoxMesh_iismu")
 
-[node name="PowerArea" type="Area3D" parent="FrontPanel/PowerSwitch" unique_id=327558168 groups=["interactable"]]
+[node name="PowerArea" type="Area3D" parent="FrontPanel/PowerSwitch" node_paths=PackedStringArray("highlight_root")]
+script = ExtResource("2_interactable")
+prompt_text = "Encender la máquina"
+highlight_root = NodePath("..")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="FrontPanel/PowerSwitch/PowerArea" unique_id=1087869118]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="FrontPanel/PowerSwitch/PowerArea"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.00033569336, -0.00047305226, -0.0032348633)
 shape = SubResource("BoxShape3D_iismu")
 
-[node name="PowerLED" type="MeshInstance3D" parent="FrontPanel" unique_id=348950085]
+[node name="PowerLED" type="MeshInstance3D" parent="FrontPanel"]
 transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, -0.035, -0.192, 0.254)
 mesh = SubResource("CylinderMesh_6jqwh")
