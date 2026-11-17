@@ -14,6 +14,8 @@ extends Node3D
 ## Ancho de cada chapa (desde la junta hasta el borde).
 @export var plate_half_width_mm: float = 75.0
 @export var bead: WeldBead
+## Línea guía sobre el eje de la junta (ayuda visual de los niveles guiados).
+@export var guide: MeshInstance3D
 
 
 func _ready() -> void:
@@ -43,3 +45,8 @@ func is_over_plate(s_mm: float, v_mm: float) -> bool:
 ## Versor "avance" de la junta en coordenadas globales.
 func travel_direction_global() -> Vector3:
 	return global_transform.basis.x.normalized()
+
+
+func set_guide_visible(value: bool) -> void:
+	if guide != null:
+		guide.visible = value

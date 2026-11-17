@@ -8,7 +8,7 @@ render_mode cull_disabled;
 uniform vec3 metal_color : source_color = vec3(0.34, 0.34, 0.36);
 uniform vec3 oxide_color : source_color = vec3(0.16, 0.14, 0.24);
 uniform vec3 glow_color : source_color = vec3(1.0, 0.42, 0.07);
-uniform float glow_strength = 5.0;
+uniform float glow_strength = 1.2;
 
 void fragment() {
 	float t = clamp(COLOR.r, 0.0, 1.0);

@@ -9,7 +9,7 @@ extends MeshInstance3D
 
 const SPACING_MM := 1.0
 const PROFILE_POINTS := 9
-const COOL_TIME_S := 6.0
+const COOL_TIME_S := 2.5
 const REBUILD_INTERVAL_S := 0.05
 const BASE_LIFT_M := 0.0002
 const SHADER_PATH := "res://Shaders/weld_bead.gdshader"

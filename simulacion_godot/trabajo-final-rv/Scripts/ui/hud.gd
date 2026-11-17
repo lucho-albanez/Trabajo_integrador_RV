@@ -36,6 +36,11 @@ var _electrode_label: Label
 var _amps_label: Label
 var _progress_bar: ProgressBar
 var _progress_label: Label
+var _guide_panel: PanelContainer
+var _guide_frame: Panel
+var _guide_frame_style: StyleBoxFlat
+var _guide_swatches: Dictionary = {}
+var _guide_hints: Dictionary = {}
 var _pause_panel: Control
 var _message_tween: Tween
 var _status_timer: float = 0.0
@@ -43,7 +48,7 @@ var _status_timer: float = 0.0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	layer = 10
+	layer = 25  # por encima de la careta (20): los mensajes deben verse con ella baja
 	_build()
 	Events.hud_message.connect(show_message)
 
@@ -149,6 +154,40 @@ func update_gauges(arc_mm: float, arc_valid: bool, speed: float, work: float, tr
 	_travel_gauge.set_value(travel)
 
 
+## Colores de estado de los indicadores guiados.
+static func state_color(state: int) -> Color:
+	match state:
+		0:
+			return Color(0.2, 0.85, 0.35)
+		1:
+			return Color(1.0, 0.8, 0.15)
+		2:
+			return Color(0.95, 0.2, 0.2)
+	return Color(0.5, 0.5, 0.55)
+
+
+func set_guides_visible(value: bool) -> void:
+	var on := value and level != null and level.show_color_guides
+	_guide_panel.visible = on
+	_guide_frame.visible = on
+
+
+## tiles: Array de {key: String, state: int (0 ok, 1 límite, 2 mal, 3 sin dato), hint: String}.
+## El marco toma el color del peor estado.
+func update_guides(tiles: Array) -> void:
+	var worst := 0
+	for t in tiles:
+		var d: Dictionary = t
+		var key: String = d["key"]
+		var st: int = d["state"]
+		if _guide_swatches.has(key):
+			(_guide_swatches[key] as ColorRect).color = state_color(st)
+			(_guide_hints[key] as Label).text = String(d["hint"])
+		if st != 3:
+			worst = maxi(worst, st)
+	_guide_frame_style.border_color = state_color(worst)
+
+
 func set_arc_state(text: String, color: Color) -> void:
 	_arc_state_label.text = text
 	_arc_state_label.add_theme_color_override("font_color", color)
@@ -241,7 +280,49 @@ func _build() -> void:
 	_progress_label = _label(br_box, 13)
 	_progress_bar = _bar(br_box)
 
+	_build_guides(root)
 	_build_pause(root)
+
+
+func _build_guides(root: Control) -> void:
+	# Marco alrededor del visor: verde/amarillo/rojo según la técnica.
+	_guide_frame = Panel.new()
+	_guide_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_guide_frame_style = StyleBoxFlat.new()
+	_guide_frame_style.bg_color = Color(0, 0, 0, 0)
+	_guide_frame_style.set_border_width_all(5)
+	_guide_frame_style.set_corner_radius_all(18)
+	_guide_frame_style.border_color = state_color(3)
+	_guide_frame.add_theme_stylebox_override("panel", _guide_frame_style)
+	_guide_frame.anchor_left = 0.27
+	_guide_frame.anchor_right = 0.73
+	_guide_frame.anchor_top = 0.29
+	_guide_frame.anchor_bottom = 0.71
+	_guide_frame.visible = false
+	root.add_child(_guide_frame)
+
+	_guide_panel = _panel(root, Control.PRESET_CENTER_RIGHT, Vector2(-250.0, -90.0))
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	_guide_panel.add_child(box)
+	for entry in [["gap", "Distancia"], ["work", "Áng. de trabajo"], ["travel", "Áng. de avance"], ["speed", "Velocidad"]]:
+		var key: String = entry[0]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		box.add_child(row)
+		var sw := ColorRect.new()
+		sw.custom_minimum_size = Vector2(22.0, 22.0)
+		sw.color = state_color(3)
+		row.add_child(sw)
+		var col := VBoxContainer.new()
+		row.add_child(col)
+		var title := _label(col, 13)
+		title.text = String(entry[1])
+		var hint := _label(col, 12)
+		hint.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+		_guide_swatches[key] = sw
+		_guide_hints[key] = hint
+	_guide_panel.visible = false
 
 
 func _build_pause(root: Control) -> void:

@@ -22,6 +22,8 @@ var show_current_hint: bool = true
 var show_arc_gauge: bool = true
 var show_speed_gauge: bool = true
 var show_angle_gauges: bool = true
+## Indicadores de color verde/amarillo/rojo (distancia, ángulos y velocidad).
+var show_color_guides: bool = true
 
 # --- Bandas de tolerancia ---
 var arc_length_band: Vector4    # mm
@@ -73,6 +75,7 @@ static func create(level: int) -> LevelConfig:
 			c.display_name = "Nivel 3 - Avanzado (examen)"
 			c.summary = "Sin ayudas: solo señales físicas, sonoras y hápticas. Tolerancias estrictas."
 			c.show_checklist = false
+			c.show_color_guides = false
 			c.show_current_hint = false
 			c.show_arc_gauge = false
 			c.show_speed_gauge = false

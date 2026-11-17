@@ -25,8 +25,8 @@ static var _strike_stream: AudioStreamWAV
 func _ready() -> void:
 	_build_light()
 	_build_glow()
-	_sparks = _build_particles(80, 0.55, 2.0, 5.0, 55.0, 0.0035, Color(1.0, 0.85, 0.4))
-	_spatter = _build_particles(14, 0.9, 0.8, 2.2, 80.0, 0.0055, Color(1.0, 0.55, 0.15))
+	_sparks = _build_particles(10, 0.35, 0.5, 1.5, 50.0, 0.0012, Color(1.0, 0.85, 0.4))
+	_spatter = _build_particles(3, 0.5, 0.3, 0.9, 70.0, 0.0018, Color(1.0, 0.55, 0.15))
 	_build_audio()
 	set_active(false, 2.5, 110.0)
 
@@ -65,7 +65,7 @@ func _process(_delta: float) -> void:
 	if not _active:
 		return
 	var flicker := 0.75 + randf() * 0.5
-	_light.light_energy = 14.0 * _intensity * flicker
+	_light.light_energy = 1.6 * _intensity * flicker
 	var s := (0.8 + randf() * 0.5) * _intensity
 	_glow.scale = Vector3.ONE * s
 
@@ -73,24 +73,24 @@ func _process(_delta: float) -> void:
 func _build_light() -> void:
 	_light = OmniLight3D.new()
 	_light.light_color = Color(0.72, 0.84, 1.0)
-	_light.omni_range = 2.5
+	_light.omni_range = 0.5
 	_light.omni_attenuation = 1.4
-	_light.shadow_enabled = true
+	_light.shadow_enabled = false
 	add_child(_light)
 
 
 func _build_glow() -> void:
 	_glow = MeshInstance3D.new()
 	var sphere := SphereMesh.new()
-	sphere.radius = 0.006
-	sphere.height = 0.012
+	sphere.radius = 0.0022
+	sphere.height = 0.0044
 	_glow.mesh = sphere
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Color(0.85, 0.92, 1.0)
 	mat.emission_enabled = true
 	mat.emission = Color(0.8, 0.9, 1.0)
-	mat.emission_energy_multiplier = 30.0
+	mat.emission_energy_multiplier = 6.0
 	_glow.material_override = mat
 	_glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_glow)
@@ -124,7 +124,7 @@ func _build_particles(amount: int, lifetime: float, v_min: float, v_max: float,
 	mat.albedo_color = color
 	mat.emission_enabled = true
 	mat.emission = color
-	mat.emission_energy_multiplier = 6.0
+	mat.emission_energy_multiplier = 2.0
 	quad.material = mat
 	p.draw_pass_1 = quad
 	add_child(p)

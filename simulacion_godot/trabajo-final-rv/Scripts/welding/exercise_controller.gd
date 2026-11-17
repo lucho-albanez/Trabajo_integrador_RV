@@ -73,6 +73,7 @@ func _ready() -> void:
 	add_child(_vfx)
 
 	hud.setup(level)
+	coupon.set_guide_visible(level.show_color_guides)
 	hud.pause_requested.connect(_set_paused.bind(true))
 	hud.resume_requested.connect(_set_paused.bind(false))
 	hud.restart_requested.connect(func() -> void: Game.start_level(level.id))
@@ -165,10 +166,13 @@ func _set_state(new_state: int) -> void:
 		State.WELDING:
 			hud.set_phase("3/3  Soldadura")
 			hud.set_gauges_visible(true)
+			hud.set_guides_visible(true)
+			coupon.set_guide_visible(level.show_color_guides)
 			hud.set_help("Q careta  |  clic izq. / gatillo: arco  |  mouse: avanzar  |  rueda: distancia  |  A/D W/S: ángulos  |  R electrodo  |  T recalibrar  |  Enter terminar")
 		State.FINISHED:
 			hud.set_phase("Ejercicio finalizado")
 			hud.set_gauges_visible(false)
+			hud.set_guides_visible(false)
 			hud.set_help("")
 	state_changed.emit(state)
 
@@ -297,6 +301,8 @@ func _update_welding_ui() -> void:
 	hud.set_electrode(holder.remaining_fraction(), holder.length_mm, holder.electrodes_used)
 	hud.set_progress(clampf(_s_mm / coupon.seam_length_mm, 0.0, 1.0), coupon.bead.coverage())
 
+	hud.update_guides(_guide_tiles(gap))
+
 	match arc.state:
 		ArcSimulator.State.ARCING:
 			match arc.zone:
@@ -319,6 +325,58 @@ func _update_welding_ui() -> void:
 		hud.set_prompt("Electrodo agotado - [R] para colocar uno nuevo")
 	else:
 		hud.set_prompt("")
+
+
+## Estado de un valor frente a una banda: 0 óptimo, 1 tolerable, 2 fuera de límites.
+static func _band_state(x: float, band: Vector4) -> int:
+	if x >= band.x and x <= band.y:
+		return 0
+	if x >= band.z and x <= band.w:
+		return 1
+	return 2
+
+
+func _guide_tiles(gap: float) -> Array:
+	var tiles: Array = []
+	# Distancia punta-chapa
+	if is_finite(gap):
+		var st := _band_state(gap, level.arc_length_band)
+		var hint := "Correcta"
+		if gap < level.arc_length_band.x:
+			hint = "Alejá la punta"
+		elif gap > level.arc_length_band.y:
+			hint = "Acercá la punta"
+		tiles.append({"key": "gap", "state": st, "hint": "%s (%.1f mm)" % [hint, gap]})
+	else:
+		tiles.append({"key": "gap", "state": 2, "hint": "Sin lectura"})
+	# Ángulo de trabajo
+	var wst := _band_state(_angles.x, level.work_band)
+	var whint := "Correcto"
+	if _angles.x < level.work_band.x:
+		whint = "Inclinar hacia el otro lado"
+	elif _angles.x > level.work_band.y:
+		whint = "Enderezar el electrodo"
+	tiles.append({"key": "work", "state": wst, "hint": "%s (%+.0f°)" % [whint, _angles.x]})
+	# Ángulo de avance
+	var tst := _band_state(_angles.y, level.travel_band)
+	var thint := "Correcto"
+	if _angles.y < level.travel_band.x:
+		thint = "Arrastrar más"
+	elif _angles.y > level.travel_band.y:
+		thint = "Inclinar menos"
+	tiles.append({"key": "travel", "state": tst, "hint": "%s (%.0f°)" % [thint, _angles.y]})
+	# Velocidad (solo con el arco encendido)
+	if arc.state == ArcSimulator.State.ARCING and arc.time_in_arc >= SPEED_VALID_AFTER_S:
+		var sst := _band_state(_speed_smooth, level.speed_band)
+		var shint := "Correcta"
+		if _speed_smooth < level.speed_band.x:
+			shint = "Más rápido"
+		elif _speed_smooth > level.speed_band.y:
+			shint = "Más lento"
+		tiles.append({"key": "speed", "state": sst, "hint": "%s (%.1f mm/s)" % [shint, _speed_smooth]})
+	else:
+		tiles.append({"key": "speed", "state": 3, "hint": "Sin arco"})
+	return tiles
 
 
 func _step_welding(delta: float) -> void:

@@ -8,7 +8,7 @@ extends CanvasLayer
 ## * Careta levantada con arco: destello cegador y aviso de seguridad.
 
 const DROP_TIME := 0.25
-const EXPOSURE_DARK := 0.12
+const EXPOSURE_DARK := 0.3
 const EXPOSURE_LIGHT_LENS := 0.7
 
 const SHADER_PATH := "res://Shaders/welding_mask.gdshader"
