@@ -37,6 +37,10 @@ var _amps_label: Label
 var _progress_bar: ProgressBar
 var _progress_label: Label
 var _guide_panel: PanelContainer
+var _guide_title: Label
+var _live_panel: PanelContainer
+var _live_title: Label
+var _live_labels: Dictionary = {}
 var _guide_frame: Panel
 var _guide_frame_style: StyleBoxFlat
 var _guide_swatches: Dictionary = {}
@@ -174,6 +178,11 @@ func set_guides_visible(value: bool) -> void:
 
 ## tiles: Array de {key: String, state: int (0 ok, 1 límite, 2 mal, 3 sin dato), hint: String}.
 ## El marco toma el color del peor estado.
+func set_guides_title(text: String, color: Color = Color(1.0, 0.85, 0.3)) -> void:
+	_guide_title.text = text
+	_guide_title.add_theme_color_override("font_color", color)
+
+
 func update_guides(tiles: Array) -> void:
 	var worst := 0
 	for t in tiles:
@@ -182,8 +191,8 @@ func update_guides(tiles: Array) -> void:
 		var st: int = d["state"]
 		if _guide_swatches.has(key):
 			(_guide_swatches[key] as ColorRect).color = state_color(st)
-			(_guide_hints[key] as Label).text = String(d["hint"])
-		if st != 3:
+			(_guide_hints[key] as Label).text = String(d["hint"]) + "\n" + String(d["detail"])
+		if st != 3 and key != "current":  # la corriente se fija antes; no tiñe el marco
 			worst = maxi(worst, st)
 	_guide_frame_style.border_color = state_color(worst)
 
@@ -301,11 +310,13 @@ func _build_guides(root: Control) -> void:
 	_guide_frame.visible = false
 	root.add_child(_guide_frame)
 
-	_guide_panel = _panel(root, Control.PRESET_CENTER_RIGHT, Vector2(-250.0, -90.0))
+	_guide_panel = _panel(root, Control.PRESET_CENTER_RIGHT, Vector2(-380.0, -170.0))
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 6)
 	_guide_panel.add_child(box)
-	for entry in [["gap", "Distancia"], ["work", "Áng. de trabajo"], ["travel", "Áng. de avance"], ["speed", "Velocidad"]]:
+	_guide_title = _label(box, 15)
+	_guide_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+	for entry in [["gap", "Distancia a la chapa"], ["work", "Ángulo de trabajo"], ["travel", "Ángulo de avance (inclinación)"], ["speed", "Velocidad de avance"], ["current", "Corriente"]]:
 		var key: String = entry[0]
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 8)
@@ -319,10 +330,66 @@ func _build_guides(root: Control) -> void:
 		var title := _label(col, 13)
 		title.text = String(entry[1])
 		var hint := _label(col, 12)
-		hint.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+		hint.custom_minimum_size = Vector2(320.0, 0.0)
+		hint.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
 		_guide_swatches[key] = sw
 		_guide_hints[key] = hint
 	_guide_panel.visible = false
+	_build_live_panel(root)
+
+
+## Lectura grande y centrada (abajo) de valor actual vs. ideal: distancia y ángulos.
+## Se usa en la calibración y antes de cebar el arco.
+func _build_live_panel(root: Control) -> void:
+	_live_panel = PanelContainer.new()
+	_live_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.0, 0.0, 0.0, 0.6)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(7.0)
+	style.border_color = Color(1.0, 0.85, 0.3)
+	style.set_border_width_all(1)
+	_live_panel.add_theme_stylebox_override("panel", style)
+	root.add_child(_live_panel)
+	_live_panel.anchor_left = 0.5
+	_live_panel.anchor_right = 0.5
+	_live_panel.anchor_top = 1.0
+	_live_panel.anchor_bottom = 1.0
+	_live_panel.offset_left = -250.0
+	_live_panel.offset_right = 250.0
+	_live_panel.offset_top = -92.0
+	_live_panel.offset_bottom = -34.0
+	_live_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	_live_panel.add_child(box)
+	_live_title = _label(box, 12)
+	_live_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+	_live_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	for entry in [["gap", "Distancia a la chapa"], ["work", "Ángulo de trabajo"], ["travel", "Ángulo de avance"]]:
+		var l := _label(box, 13)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.add_theme_color_override("font_outline_color", Color.BLACK)
+		l.add_theme_constant_override("outline_size", 3)
+		_live_labels[String(entry[0])] = [l, String(entry[1])]
+	_live_panel.visible = false
+
+
+func set_live_visible(value: bool) -> void:
+	_live_panel.visible = value
+
+
+func update_live(title: String, tiles: Array) -> void:
+	_live_title.text = title
+	for t in tiles:
+		var d: Dictionary = t
+		var key: String = d["key"]
+		if not _live_labels.has(key):
+			continue
+		var pair: Array = _live_labels[key]
+		var l: Label = pair[0]
+		l.text = "%s  -  %s" % [String(pair[1]), String(d["detail"])]
+		l.add_theme_color_override("font_color", state_color(int(d["state"])))
 
 
 func _build_pause(root: Control) -> void:

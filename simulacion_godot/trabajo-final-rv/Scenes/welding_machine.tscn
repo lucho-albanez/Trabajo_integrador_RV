@@ -2,120 +2,57 @@
 
 [ext_resource type="Script" path="res://Scripts/world/welding_machine.gd" id="1_script"]
 [ext_resource type="Script" path="res://Scripts/interaction/interactable.gd" id="2_interactable"]
+[ext_resource type="PackedScene" path="res://Assets/models/machine_body.glb" id="3_body"]
+[ext_resource type="PackedScene" path="res://Assets/models/machine_knob.glb" id="4_knob"]
+[ext_resource type="PackedScene" path="res://Assets/models/machine_rocker.glb" id="5_rocker"]
 
-[sub_resource type="BoxShape3D" id="BoxShape3D_k0h2g"]
-size = Vector3(0.35351563, 0.5092926, 0.53100586)
+[sub_resource type="BoxShape3D" id="BoxShape3D_body"]
+size = Vector3(0.30, 0.525, 0.54)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_abf0k"]
-albedo_color = Color(0.15686275, 0.36078432, 0, 1)
+[sub_resource type="BoxShape3D" id="BoxShape3D_knob"]
+size = Vector3(0.1, 0.1, 0.05)
 
-[sub_resource type="BoxMesh" id="BoxMesh_k0h2g"]
-material = SubResource("StandardMaterial3D_abf0k")
-size = Vector3(0.35, 0.45, 0.5)
+[sub_resource type="BoxShape3D" id="BoxShape3D_switch"]
+size = Vector3(0.06, 0.07, 0.05)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_2ckh1"]
-albedo_color = Color(0.15686275, 0.36078432, 0, 1)
+[sub_resource type="SphereMesh" id="SphereMesh_led"]
+radius = 0.0065
+height = 0.008
+radial_segments = 16
+rings = 6
 
-[sub_resource type="BoxMesh" id="BoxMesh_6jqwh"]
-material = SubResource("StandardMaterial3D_2ckh1")
-size = Vector3(0.28167725, 0.0592041, 0.27905273)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pf2q1"]
-albedo_color = Color(0, 0, 0, 1)
-
-[sub_resource type="BoxMesh" id="BoxMesh_00eda"]
-material = SubResource("StandardMaterial3D_pf2q1")
-size = Vector3(0.254776, 0.13678741, 0.045410156)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_6jqwh"]
-albedo_color = Color(0.0627451, 0.9098039, 0.84705883, 1)
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_k0h2g"]
-material = SubResource("StandardMaterial3D_6jqwh")
-top_radius = 0.045410156
-bottom_radius = 0.045410156
-height = 0.026306152
-
-[sub_resource type="CylinderShape3D" id="CylinderShape3D_k0h2g"]
-height = 0.08
-radius = 0.08
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_iismu"]
-albedo_color = Color(0, 0, 0, 1)
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_b7qso"]
-material = SubResource("StandardMaterial3D_iismu")
-top_radius = 0.03857422
-bottom_radius = 0.03857422
-height = 0.095581055
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_b7qso"]
-albedo_color = Color(1, 0, 0, 1)
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_nc0uj"]
-material = SubResource("StandardMaterial3D_b7qso")
-top_radius = 0.03857422
-bottom_radius = 0.03857422
-height = 0.095581055
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_nc0uj"]
-albedo_color = Color(0, 0, 0, 1)
-metallic_specular = 0.0
-
-[sub_resource type="BoxMesh" id="BoxMesh_iismu"]
-material = SubResource("StandardMaterial3D_nc0uj")
-size = Vector3(0.07055664, 0.030029297, 0.024841309)
-
-[sub_resource type="BoxShape3D" id="BoxShape3D_iismu"]
-size = Vector3(0.12, 0.08, 0.08)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_kv60n"]
-albedo_color = Color(1, 0, 0.26666668, 1)
-metallic = 1.0
-metallic_specular = 1.0
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_6jqwh"]
-material = SubResource("StandardMaterial3D_kv60n")
-top_radius = 0.018066406
-bottom_radius = 0.018066406
-height = 0.012573242
-
-[node name="WeldingMachine" type="RigidBody3D" node_paths=PackedStringArray("display_label", "power_led", "knob", "power_interactable", "knob_interactable")]
+[node name="WeldingMachine" type="RigidBody3D" node_paths=PackedStringArray("display_label", "power_led", "knob", "power_switch", "power_interactable", "knob_interactable")]
 freeze = true
 script = ExtResource("1_script")
 display_label = NodePath("FrontPanel/Display/DisplayLabel")
 power_led = NodePath("FrontPanel/PowerLED")
 knob = NodePath("FrontPanel/Knob")
+power_switch = NodePath("FrontPanel/PowerSwitch")
 power_interactable = NodePath("FrontPanel/PowerSwitch/PowerArea")
 knob_interactable = NodePath("FrontPanel/Knob/KnobArea")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.031105042, -0.05)
-shape = SubResource("BoxShape3D_k0h2g")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0375, 0.02)
+shape = SubResource("BoxShape3D_body")
 
-[node name="Cabinet" type="MeshInstance3D" parent="."]
-mesh = SubResource("BoxMesh_k0h2g")
-
-[node name="Handle" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.014007568, 0.25571096, -0.027954102)
-mesh = SubResource("BoxMesh_6jqwh")
+[node name="Body" parent="." instance=ExtResource("3_body")]
 
 [node name="FrontPanel" type="Node3D" parent="."]
 
-[node name="Display" type="MeshInstance3D" parent="FrontPanel"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0017831028, 0.095276594, 0.2614798)
-mesh = SubResource("BoxMesh_00eda")
+[node name="Display" type="Node3D" parent="FrontPanel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.12, 0)
 
 [node name="DisplayLabel" type="Label3D" parent="FrontPanel/Display"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.02273956)
-pixel_size = 0.002
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.2685)
+pixel_size = 0.0011
 modulate = Color(1, 0, 0, 1)
 text = "OFF"
-font_size = 39
+font_size = 40
 
-[node name="Knob" type="MeshInstance3D" parent="FrontPanel"]
-transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, -0.1015493, -0.040686876, 0.258933)
-mesh = SubResource("CylinderMesh_k0h2g")
+[node name="Knob" type="Node3D" parent="FrontPanel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.01, 0.2595)
+
+[node name="Model" parent="FrontPanel/Knob" instance=ExtResource("4_knob")]
 
 [node name="KnobArea" type="Area3D" parent="FrontPanel/Knob" node_paths=PackedStringArray("highlight_root")]
 script = ExtResource("2_interactable")
@@ -124,20 +61,13 @@ highlight_root = NodePath("..")
 accepts_scroll = true
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="FrontPanel/Knob/KnobArea"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0021972656, 0)
-shape = SubResource("CylinderShape3D_k0h2g")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.02)
+shape = SubResource("BoxShape3D_knob")
 
-[node name="TerminalPos" type="MeshInstance3D" parent="FrontPanel"]
-transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, -0.0056072474, -0.11458716, 0.22270703)
-mesh = SubResource("CylinderMesh_b7qso")
+[node name="PowerSwitch" type="Node3D" parent="FrontPanel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.185, 0.2625)
 
-[node name="TerminalNeg" type="MeshInstance3D" parent="FrontPanel"]
-transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, 0.09520215, -0.11458716, 0.22270703)
-mesh = SubResource("CylinderMesh_nc0uj")
-
-[node name="PowerSwitch" type="MeshInstance3D" parent="FrontPanel"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.109692335, -0.17864397, 0.2617675)
-mesh = SubResource("BoxMesh_iismu")
+[node name="Model" parent="FrontPanel/PowerSwitch" instance=ExtResource("5_rocker")]
 
 [node name="PowerArea" type="Area3D" parent="FrontPanel/PowerSwitch" node_paths=PackedStringArray("highlight_root")]
 script = ExtResource("2_interactable")
@@ -145,9 +75,47 @@ prompt_text = "Encender la máquina"
 highlight_root = NodePath("..")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="FrontPanel/PowerSwitch/PowerArea"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.00033569336, -0.00047305226, -0.0032348633)
-shape = SubResource("BoxShape3D_iismu")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.02)
+shape = SubResource("BoxShape3D_switch")
+
+[node name="TerminalPos" type="Marker3D" parent="FrontPanel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.085, -0.135, 0.28)
+
+[node name="TerminalNeg" type="Marker3D" parent="FrontPanel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.085, -0.135, 0.28)
 
 [node name="PowerLED" type="MeshInstance3D" parent="FrontPanel"]
-transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, -0.035, -0.192, 0.254)
-mesh = SubResource("CylinderMesh_6jqwh")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.1, -0.01, 0.2605)
+mesh = SubResource("SphereMesh_led")
+
+[node name="LabelCorriente" type="Label3D" parent="FrontPanel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.066, 0.2585)
+pixel_size = 0.0005
+modulate = Color(0.08, 0.08, 0.09, 1)
+text = "CORRIENTE (A)"
+font_size = 28
+shaded = true
+
+[node name="LabelModelo" type="Label3D" parent="FrontPanel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.192, 0.2585)
+pixel_size = 0.0005
+modulate = Color(0.08, 0.08, 0.09, 1)
+text = "SMAW / MMA  200 A"
+font_size = 32
+shaded = true
+
+[node name="LabelPos" type="Label3D" parent="FrontPanel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.085, -0.173, 0.2585)
+pixel_size = 0.0006
+modulate = Color(0.7, 0.05, 0.04, 1)
+text = "+ ELECTRODO"
+font_size = 28
+shaded = true
+
+[node name="LabelNeg" type="Label3D" parent="FrontPanel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.085, -0.173, 0.2585)
+pixel_size = 0.0006
+modulate = Color(0.05, 0.18, 0.7, 1)
+text = "- MASA"
+font_size = 28
+shaded = true

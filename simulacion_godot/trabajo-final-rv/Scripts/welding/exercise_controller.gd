@@ -18,7 +18,9 @@ enum State { SETUP, CALIBRATING, WELDING, FINISHED }
 const SPEED_SMOOTH_TAU_S := 0.25
 const SPEED_VALID_AFTER_S := 0.5
 const NOMINAL_SPEED_MM_S := 3.0
-const CALIBRATION_TIME_S := 1.5
+## Transparencia del portaelectrodo durante la calibración y la soldadura (0 opaco, 1 invisible).
+const HOLDER_GHOST_TRANSPARENCY := 0.85
+const CALIBRATION_TIME_S := 3.0
 const VISUAL_GAP_MAX_MM := 30.0
 const END_MARGIN_MM := 1.0
 
@@ -30,11 +32,14 @@ const END_MARGIN_MM := 1.0
 @export var coupon: Coupon
 @export var hud: Hud
 @export var report_window: ReportWindow
+## Cable del portaelectrodo: se oculta mientras se suelda para no tapar la vista de la junta.
+@export var electrode_cable: Node3D
 
 var state: int = State.SETUP
 var level: LevelConfig
 var arc: ArcSimulator
 var evaluator: WeldEvaluator
+var recorder: SessionRecorder
 var report: Dictionary = {}
 
 var _haptics: HapticController
@@ -49,6 +54,8 @@ var _electrode_used_mm: float = 0.0
 var _current_a: float = 0.0
 var _was_mask_violation: bool = false
 var _last_depleted_msg_msec: int = 0
+var _last_width: float = 0.0
+var _last_pen: float = 0.0
 
 
 func _ready() -> void:
@@ -57,6 +64,7 @@ func _ready() -> void:
 	coupon.bead.reset(LevelConfig.SEAM_LENGTH_MM)
 
 	evaluator = WeldEvaluator.new()
+	recorder = SessionRecorder.new()
 	arc = ArcSimulator.new()
 	arc.name = "ArcSimulator"
 	add_child(arc)
@@ -148,8 +156,26 @@ func _on_link_changed(connected: bool) -> void:
 # Estados
 # ---------------------------------------------------------------------------
 
+## Vuelve el portaelectrodo casi transparente (solo se insinúa la silueta) para
+## que el mango no tape la junta. El electrodo en la punta también se atenúa menos.
+func _set_holder_ghost(on: bool) -> void:
+	if holder == null:
+		return
+	for n in holder.find_children("*", "GeometryInstance3D", true, false):
+		var g := n as GeometryInstance3D
+		if g == null or g is CPUParticles3D or g is GPUParticles3D:
+			continue
+		if g.name == &"Electrode":  # el electrodo siempre se ve sólido
+			continue
+		g.transparency = HOLDER_GHOST_TRANSPARENCY if on else 0.0
+		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if on else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+
 func _set_state(new_state: int) -> void:
 	state = new_state
+	if electrode_cable != null:
+		electrode_cable.visible = state != State.CALIBRATING and state != State.WELDING
+	_set_holder_ghost(state == State.CALIBRATING or state == State.WELDING)
 	match state:
 		State.SETUP:
 			hud.set_phase("1/3  Preparación del equipo")
@@ -163,6 +189,8 @@ func _set_state(new_state: int) -> void:
 			hud.set_crosshair_visible(false)
 			hud.set_prompt("")
 			hud.set_help("")
+			hud.set_guides_visible(true)
+			hud.set_live_visible(true)
 		State.WELDING:
 			hud.set_phase("3/3  Soldadura")
 			hud.set_gauges_visible(true)
@@ -173,6 +201,7 @@ func _set_state(new_state: int) -> void:
 			hud.set_phase("Ejercicio finalizado")
 			hud.set_gauges_visible(false)
 			hud.set_guides_visible(false)
+			hud.set_live_visible(false)
 			hud.set_help("")
 	state_changed.emit(state)
 
@@ -216,6 +245,7 @@ func _run_calibration() -> void:
 
 func _begin_welding() -> void:
 	evaluator.setup(level, _current_a)
+	recorder.setup(level, _current_a)
 	arc.reset()
 	_s_mm = 0.0
 	_v_mm = 0.0
@@ -250,7 +280,7 @@ func finish_exercise() -> void:
 	(report["stats"] as Dictionary)["interruptions"] = coupon.bead.interruptions()
 	Game.last_report = report
 	_set_state(State.FINISHED)
-	report_window.show_report(report, level.id < LevelConfig.LEVEL_COUNT)
+	report_window.show_report(report, level.id < LevelConfig.LEVEL_COUNT, recorder)
 	exercise_finished.emit(report)
 
 
@@ -262,6 +292,8 @@ func _process(_delta: float) -> void:
 	match state:
 		State.SETUP:
 			_update_setup_ui()
+		State.CALIBRATING:
+			_update_calibration_ui()
 		State.WELDING:
 			_update_welding_ui()
 
@@ -294,6 +326,17 @@ func _update_setup_ui() -> void:
 	hud.set_progress(0.0, 0.0)
 
 
+## Durante la calibración se muestran en vivo los valores actuales e ideales
+## para que el operario posicione y oriente la herramienta antes de cebar el arco.
+func _update_calibration_ui() -> void:
+	_angles = WeldGeometry.angles_from_up(DeviceLink.get_tool_up())
+	var gap := DeviceLink.get_arc_gap_mm()
+	var tiles := _guide_tiles(gap)
+	hud.update_guides(tiles)
+	hud.set_guides_title("CALIBRACIÓN: posicioná y orientá la herramienta")
+	hud.update_live("CALIBRACIÓN: posicioná y orientá la herramienta", tiles)
+
+
 func _update_welding_ui() -> void:
 	var gap := DeviceLink.get_arc_gap_mm()
 	hud.update_gauges(gap if is_finite(gap) else 0.0, is_finite(gap), _speed_smooth, _angles.x, _angles.y)
@@ -301,7 +344,24 @@ func _update_welding_ui() -> void:
 	hud.set_electrode(holder.remaining_fraction(), holder.length_mm, holder.electrodes_used)
 	hud.set_progress(clampf(_s_mm / coupon.seam_length_mm, 0.0, 1.0), coupon.bead.coverage())
 
-	hud.update_guides(_guide_tiles(gap))
+	var tiles := _guide_tiles(gap)
+	hud.update_guides(tiles)
+	hud.set_live_visible(arc.state == ArcSimulator.State.OFF and level.show_color_guides)
+	if arc.state == ArcSimulator.State.OFF:
+		var all_ok: bool = true
+		for t in tiles:
+			var d: Dictionary = t
+			var is_pose: bool = d["key"] == "gap" or d["key"] == "work" or d["key"] == "travel"
+			if is_pose and int(d["state"]) == 2:
+				all_ok = false
+		if all_ok:
+			hud.set_guides_title("POSICIÓN CORRECTA: podés cebar el arco", Hud.COLOR_OK)
+			hud.update_live("POSICIÓN CORRECTA: podés cebar el arco", tiles)
+		else:
+			hud.set_guides_title("PRE-ARCO: corregí la posición hasta ver verde")
+			hud.update_live("PRE-ARCO: corregí la posición hasta ver verde", tiles)
+	else:
+		hud.set_guides_title("SOLDADURA EN CURSO")
 
 	match arc.state:
 		ArcSimulator.State.ARCING:
@@ -336,46 +396,64 @@ static func _band_state(x: float, band: Vector4) -> int:
 	return 2
 
 
+func _detail(actual: String, band: Vector4, unit: String, decimals: int) -> String:
+	var fmt := "%." + str(decimals) + "f"
+	return ("Actual: " + fmt + " %s  |  Ideal: " + fmt + " %s  (" + fmt + " a " + fmt + ")") % [
+		float(actual), unit, SessionRecorder.ideal_of(band), unit, band.x, band.y]
+
+
 func _guide_tiles(gap: float) -> Array:
 	var tiles: Array = []
+	var lv := level
 	# Distancia punta-chapa
 	if is_finite(gap):
-		var st := _band_state(gap, level.arc_length_band)
 		var hint := "Correcta"
-		if gap < level.arc_length_band.x:
+		if gap < lv.arc_length_band.x:
 			hint = "Alejá la punta"
-		elif gap > level.arc_length_band.y:
+		elif gap > lv.arc_length_band.y:
 			hint = "Acercá la punta"
-		tiles.append({"key": "gap", "state": st, "hint": "%s (%.1f mm)" % [hint, gap]})
+		tiles.append({"key": "gap", "state": _band_state(gap, lv.arc_length_band), "hint": hint,
+			"detail": _detail(str(gap), lv.arc_length_band, "mm", 1)})
 	else:
-		tiles.append({"key": "gap", "state": 2, "hint": "Sin lectura"})
-	# Ángulo de trabajo
-	var wst := _band_state(_angles.x, level.work_band)
+		tiles.append({"key": "gap", "state": 2, "hint": "Sin lectura del sensor",
+			"detail": "Ideal: %.1f mm  (%.1f a %.1f)" % [SessionRecorder.ideal_of(lv.arc_length_band), lv.arc_length_band.x, lv.arc_length_band.y]})
+	# Ángulo de trabajo (desvío respecto de la perpendicular)
 	var whint := "Correcto"
-	if _angles.x < level.work_band.x:
+	if _angles.x < lv.work_band.x:
 		whint = "Inclinar hacia el otro lado"
-	elif _angles.x > level.work_band.y:
+	elif _angles.x > lv.work_band.y:
 		whint = "Enderezar el electrodo"
-	tiles.append({"key": "work", "state": wst, "hint": "%s (%+.0f°)" % [whint, _angles.x]})
-	# Ángulo de avance
-	var tst := _band_state(_angles.y, level.travel_band)
+	tiles.append({"key": "work", "state": _band_state(_angles.x, lv.work_band), "hint": whint,
+		"detail": _detail(str(_angles.x), lv.work_band, "°", 0)})
+	# Ángulo de avance (arrastre)
 	var thint := "Correcto"
-	if _angles.y < level.travel_band.x:
+	if _angles.y < lv.travel_band.x:
 		thint = "Arrastrar más"
-	elif _angles.y > level.travel_band.y:
+	elif _angles.y > lv.travel_band.y:
 		thint = "Inclinar menos"
-	tiles.append({"key": "travel", "state": tst, "hint": "%s (%.0f°)" % [thint, _angles.y]})
+	tiles.append({"key": "travel", "state": _band_state(_angles.y, lv.travel_band), "hint": thint,
+		"detail": _detail(str(_angles.y), lv.travel_band, "°", 0)})
 	# Velocidad (solo con el arco encendido)
 	if arc.state == ArcSimulator.State.ARCING and arc.time_in_arc >= SPEED_VALID_AFTER_S:
-		var sst := _band_state(_speed_smooth, level.speed_band)
 		var shint := "Correcta"
-		if _speed_smooth < level.speed_band.x:
+		if _speed_smooth < lv.speed_band.x:
 			shint = "Más rápido"
-		elif _speed_smooth > level.speed_band.y:
+		elif _speed_smooth > lv.speed_band.y:
 			shint = "Más lento"
-		tiles.append({"key": "speed", "state": sst, "hint": "%s (%.1f mm/s)" % [shint, _speed_smooth]})
+		tiles.append({"key": "speed", "state": _band_state(_speed_smooth, lv.speed_band), "hint": shint,
+			"detail": _detail(str(_speed_smooth), lv.speed_band, "mm/s", 1)})
 	else:
-		tiles.append({"key": "speed", "state": 3, "hint": "Sin arco"})
+		tiles.append({"key": "speed", "state": 3, "hint": "Con el arco encendido",
+			"detail": "Ideal: %.1f mm/s  (%.1f a %.1f)" % [SessionRecorder.ideal_of(lv.speed_band), lv.speed_band.x, lv.speed_band.y]})
+	# Corriente
+	var cst := _band_state(_current_a, lv.current_band)
+	var chint := "Correcta"
+	if _current_a < lv.current_band.x:
+		chint = "Corriente baja"
+	elif _current_a > lv.current_band.y:
+		chint = "Corriente alta"
+	tiles.append({"key": "current", "state": cst, "hint": chint,
+		"detail": _detail(str(_current_a), lv.current_band, "A", 0)})
 	return tiles
 
 
@@ -420,7 +498,17 @@ func _step_welding(delta: float) -> void:
 		_weld_step(delta, prev_s, prev_v, gap)
 	_apply_feedback(arcing, gap)
 
-	# 4) Pose del portaelectrodo virtual.
+	# 4) Registro para el informe y el CSV.
+	recorder.sample(delta, {
+		"t": _weld_time, "arc": arcing, "s": _s_mm, "v": _v_mm,
+		"speed": _speed_smooth, "gap": gap if is_finite(gap) else 0.0,
+		"work": _angles.x, "travel": _angles.y,
+		"width": _last_width if arcing else 0.0,
+		"penetration": _last_pen if arcing else 0.0,
+		"mask": player.mask_hud.is_down,
+	})
+
+	# 5) Pose del portaelectrodo virtual.
 	_place_holder(gap)
 
 
@@ -444,6 +532,8 @@ func _weld_step(delta: float, prev_s: float, prev_v: float, gap: float) -> void:
 	var pen := WeldPhysics.penetration_mm(_current_a, speed_phys, gap, _angles.y)
 	var undercut := WeldPhysics.undercut_mm(_current_a, speed_phys)
 
+	_last_width = width
+	_last_pen = pen
 	evaluator.add_sample(delta, {
 		"arc_len": gap,
 		"speed": _speed_smooth if arc.time_in_arc >= SPEED_VALID_AFTER_S else -1.0,

@@ -65,7 +65,7 @@ func _process(_delta: float) -> void:
 	if not _active:
 		return
 	var flicker := 0.75 + randf() * 0.5
-	_light.light_energy = 1.6 * _intensity * flicker
+	_light.light_energy = 0.6 * _intensity * flicker
 	var s := (0.8 + randf() * 0.5) * _intensity
 	_glow.scale = Vector3.ONE * s
 
@@ -90,7 +90,7 @@ func _build_glow() -> void:
 	mat.albedo_color = Color(0.85, 0.92, 1.0)
 	mat.emission_enabled = true
 	mat.emission = Color(0.8, 0.9, 1.0)
-	mat.emission_energy_multiplier = 6.0
+	mat.emission_energy_multiplier = 2.5
 	_glow.material_override = mat
 	_glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_glow)
@@ -124,7 +124,7 @@ func _build_particles(amount: int, lifetime: float, v_min: float, v_max: float,
 	mat.albedo_color = color
 	mat.emission_enabled = true
 	mat.emission = color
-	mat.emission_energy_multiplier = 2.0
+	mat.emission_energy_multiplier = 1.2
 	quad.material = mat
 	p.draw_pass_1 = quad
 	add_child(p)

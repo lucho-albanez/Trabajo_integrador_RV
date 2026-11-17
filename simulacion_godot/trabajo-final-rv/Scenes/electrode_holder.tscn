@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" path="res://Scripts/interaction/electrode_holder.gd" id="1_holder"]
 [ext_resource type="Script" path="res://Scripts/interaction/interactable.gd" id="2_interactable"]
+[ext_resource type="PackedScene" path="res://Assets/models/electrode_holder.glb" id="3_model"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(0.08, 0.4, 0.35)
@@ -26,8 +27,8 @@ material = SubResource("StandardMaterial3D_head")
 size = Vector3(0.04, 0.05, 0.06)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_electrode"]
-albedo_color = Color(0.55, 0.45, 0.35, 1)
-roughness = 0.8
+albedo_color = Color(0.42, 0.36, 0.3, 1)
+roughness = 0.85
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_electrode"]
 material = SubResource("StandardMaterial3D_electrode")
@@ -49,19 +50,13 @@ electrode_mesh = NodePath("Electrode")
 cable_point = NodePath("CablePoint")
 
 [node name="CablePoint" type="Marker3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.16)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.168)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.16, -0.003)
 shape = SubResource("BoxShape3D_body")
 
-[node name="Handle" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, 0, 0, -0.033125)
-mesh = SubResource("CylinderMesh_handle")
-
-[node name="Head" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.11985576)
-mesh = SubResource("BoxMesh_head")
+[node name="Model" parent="." instance=ExtResource("3_model")]
 
 [node name="Electrode" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.17703, 0.11914)

@@ -259,11 +259,13 @@ func _prepare_and_start(scene: Node) -> ExerciseController:
 
 	ctrl.start_exercise()
 	_check(ctrl.state == ExerciseController.State.CALIBRATING, "comienza la calibración")
+	_check(ctrl.electrode_cable != null and not ctrl.electrode_cable.visible, "el cable se oculta al calibrar")
 	var guard := 0
 	while ctrl.state != ExerciseController.State.WELDING and guard < 600:
 		guard += 1
 		await get_tree().physics_frame
 	_check(ctrl.state == ExerciseController.State.WELDING, "pasa a la fase de soldadura (%d cuadros)" % guard)
+	_check(not ctrl.electrode_cable.visible, "el cable sigue oculto durante la soldadura")
 	return ctrl
 
 
@@ -301,6 +303,18 @@ func _run_scenario(level: int, speed: float, gap: float, work: float, travel: fl
 	print("     [%s] nota %.1f (%s)  cobertura %.0f %%  electrodo %.0f mm" % [
 		label, float(report["grade"]), String(report["grade_label"]),
 		float((report["stats"] as Dictionary)["coverage_pct"]), consumed])
+	if label == "ideal":
+		var rec := ctrl.recorder
+		_check(rec.rows.size() > 100, "[%s] se registró la serie temporal (%d filas)" % [label, rec.rows.size()])
+		var path := rec.export_csv(report, "/tmp/csv_test")
+		_check(path != "" and FileAccess.file_exists(path), "[%s] se exporta el CSV (%s)" % [label, path])
+		var txt := FileAccess.get_file_as_string(path)
+		_check(txt.contains("sep=;") and txt.contains("tiempo_s;arco_encendido") and txt.contains("# CRITERIOS"), "[%s] el CSV tiene resumen y serie" % label)
+		_check(txt.contains("velocidad_ideal_mm_s") and txt.contains(","), "[%s] el CSV usa decimales con coma" % label)
+		var win := ctrl.report_window
+		_check(win.visible, "[%s] se muestra la ventana del informe" % label)
+		var charts := win.find_children("*", "SeriesChart", true, false)
+		_check(charts.size() == 6, "[%s] el informe tiene 6 gráficos" % label)
 	scene.queue_free()
 	await get_tree().physics_frame
 	await get_tree().physics_frame

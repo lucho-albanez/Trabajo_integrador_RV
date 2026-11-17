@@ -15,7 +15,8 @@ signal amperage_changed(amps: int)
 @export_group("Nodos")
 @export var display_label: Label3D
 @export var power_led: MeshInstance3D
-@export var knob: MeshInstance3D
+@export var knob: Node3D
+@export var power_switch: Node3D
 @export var power_interactable: Interactable
 @export var knob_interactable: Interactable
 
@@ -74,6 +75,7 @@ func cycle_amperage() -> void:
 
 func _refresh() -> void:
 	_update_knob()
+	_update_switch()
 	_update_display()
 	_update_led()
 	_update_prompts()
@@ -83,8 +85,15 @@ func _update_knob() -> void:
 	if knob == null:
 		return
 	var ratio := float(current_amperage - min_amperage) / float(max_amperage - min_amperage)
-	var angle := deg_to_rad(lerpf(-135.0, 135.0, ratio))
+	# Mínimo abajo a la izquierda, máximo abajo a la derecha (sentido horario).
+	var angle := deg_to_rad(lerpf(135.0, -135.0, ratio))
 	knob.transform.basis = _knob_base_basis.rotated(Vector3(0.0, 0.0, 1.0), angle)
+
+
+func _update_switch() -> void:
+	if power_switch != null:
+		# Encendido: el borde superior de la tecla queda hundido.
+		power_switch.rotation.x = deg_to_rad(-10.0 if is_on else 10.0)
 
 
 func _update_display() -> void:
