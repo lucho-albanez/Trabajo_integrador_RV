@@ -26,6 +26,10 @@ Game="*res://Scripts/autoload/game.gd"
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
+[dotnet]
+
+project/assembly_name="Trabajo_final_RV"
+
 [input]
 
 left={
