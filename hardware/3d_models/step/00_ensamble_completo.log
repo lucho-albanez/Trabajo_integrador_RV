@@ -1,5 +1,5 @@
 Conversión de STEP a Solid Edge
-Fecha: martes,noviembre 17,2026 10:49p. m.
+Fecha: miércoles,noviembre 18,2026 11:38a. m.
 Archivo fuente: C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\00_ensamble_completo.step
 Autor: Author
 Organización: Open CASCADE
@@ -40,15 +40,15 @@ Importar vía de acceso:
 Convirtiendo a tipos de datos Parasolid...
 +Empezar conjunto: 1
 +Creado archivo de conjunto SE C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\00_ensamble_completo_0.asm
-|--+Creado archivo de pieza SE C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\01_Carcasa_Derecha_3.par
-|--+Creado archivo de pieza SE C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\02_Carcasa_Izquierda_3.par
-|--+Creado archivo de pieza SE C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\03_Modulo_Sensor_ToF_3.par
-|--+Creado archivo de pieza SE C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\04_Electrodo_60mm_3.par
-|--+Creado archivo de pieza SE C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\05_Soporte_ArUco_2.par
+|--+Creado archivo de pieza SE C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\01_Carcasa_Derecha_4.par
+|--+Creado archivo de pieza SE C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\02_Carcasa_Izquierda_4.par
+|--+Creado archivo de pieza SE C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\03_Modulo_Sensor_ToF_4.par
+|--+Creado archivo de pieza SE C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\04_Electrodo_60mm_4.par
+|--+Creado archivo de pieza SE C:\Users\MSI\Documents\FING\Materias\RV\repo\Trabajo_integrador_RV\hardware\3d_models\step\05_Soporte_ArUco_3.par
 +Piezas totales: 10
 +Conjuntos: 0
 +Cuerpos sólidos: 10
 +Cuerpos de hoja: 0
 +Terminar conjunto: 1
 Proceso de conversión completado
-Tiempo total requerido para convertir y posprocesar:00 : 00 : 02
+Tiempo total requerido para convertir y posprocesar:00 : 00 : 03

@@ -4,6 +4,7 @@
  */
 
 #include "HapticFeedback.h"
+#include <esp_arduino_version.h>
 
 HapticFeedback::HapticFeedback(uint8_t pinPwm, uint8_t pwmChannel)
     : _pinPwm(pinPwm),
@@ -14,16 +15,24 @@ HapticFeedback::HapticFeedback(uint8_t pinPwm, uint8_t pwmChannel)
       _patternToggle(false) {}
 
 bool HapticFeedback::begin() {
-    // Configuración del periférico LEDC de ESP32
+    // Configuración del periférico LEDC de ESP32 (compatible con Core 2.x y 3.x)
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcAttach(_pinPwm, HAPTIC_PWM_FREQ, HAPTIC_PWM_RES);
+#else
     ledcSetup(_pwmChannel, HAPTIC_PWM_FREQ, HAPTIC_PWM_RES);
     ledcAttachPin(_pinPwm, _pwmChannel);
+#endif
     applyPwm(0);
     return true;
 }
 
 void HapticFeedback::applyPwm(uint8_t duty) {
     _currentDuty = duty;
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcWrite(_pinPwm, duty);
+#else
     ledcWrite(_pwmChannel, duty);
+#endif
 }
 
 void HapticFeedback::setMode(HapticMode mode) {
