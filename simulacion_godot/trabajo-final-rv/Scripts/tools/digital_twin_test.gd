@@ -34,15 +34,21 @@ func _process(_delta: float) -> void:
 		lbl_status.text = "Hardware: ESPERANDO SEÑAL (Ejecuta iniciar_puente.bat)"
 		lbl_status.modulate = Color(1.0, 0.6, 0.2)
 
-	# Actualizar orientación de la herramienta 3D
+	# Actualizar orientación y elevación de la herramienta 3D
 	if DeviceLink._hw_has_orientation:
 		# Aplicamos la base orientada directamente al pivot del modelo 3D
 		var rel_basis: Basis = DeviceLink._hw_basis * DeviceLink._hw_ref_basis.inverse()
 		tool_pivot.basis = rel_basis
 
-	# Mostrar ángulos calculados
+	# Altura de la herramienta virtual según distancia medida desde la punta del electrodo
+	var gap := DeviceLink.get_arc_gap_mm()
+	if is_finite(gap):
+		tool_pivot.position.y = clampf(gap * 0.003, 0.0, 0.20)
+
+	# Mostrar ángulos calculados y distancia de arco real
 	var angles: Vector2 = WeldGeometry.angles_from_up(DeviceLink.get_tool_up())
-	lbl_angles.text = "Ángulo Trabajo: %+.1f°  |  Ángulo Avance: %+.1f°" % [angles.x, angles.y]
+	var gap_str := "%.1f mm" % gap if is_finite(gap) else "-- mm"
+	lbl_angles.text = "Trabajo: %+.1f°  |  Avance: %+.1f°  |  Dist. Punta: %s" % [angles.x, angles.y, gap_str]
 
 	# Mostrar pulsador
 	var trig: bool = DeviceLink.get_trigger()
