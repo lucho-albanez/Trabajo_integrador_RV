@@ -16,6 +16,7 @@ RESET_YAW, SET_HAPTIC, PING) se escriben en el puerto serie terminados en "\\n".
 Se reconecta solo si se desenchufa el cable.
 """
 import argparse
+import os
 import json
 import math
 import socket
@@ -23,6 +24,7 @@ import sys
 import time
 
 GODOT_ADDR = ("127.0.0.1", 4242)
+VISION_ADDR = ("127.0.0.1", 4244)
 COMMAND_PORT = 4243
 BAUD = 115200
 ESP32_VIDS = {0x10C4, 0x1A86, 0x0403, 0x303A}  # CP210x, CH340, FTDI, Espressif
@@ -31,10 +33,22 @@ ESP32_VIDS = {0x10C4, 0x1A86, 0x0403, 0x303A}  # CP210x, CH340, FTDI, Espressif
 def find_port():
     from serial.tools import list_ports
     ports = list(list_ports.comports())
+    if not ports:
+        return None
+    # 1. VID conocido
     for p in ports:
         if p.vid in ESP32_VIDS:
             return p.device
-    return ports[0].device if len(ports) == 1 else None
+    # 2. Descripcion con palabras clave USB / Serial
+    for p in ports:
+        desc = (p.description or "").lower()
+        if any(k in desc for k in ["usb", "ch340", "cp210", "uart", "serial", "esp32"]):
+            return p.device
+    # 3. Candidato que no sea puerto COM1/COM2 de placa madre
+    usb_candidates = [p.device for p in ports if p.device.upper() not in ["COM1", "COM2"]]
+    if usb_candidates:
+        return usb_candidates[0]
+    return ports[0].device
 
 
 def open_command_socket():
@@ -58,6 +72,24 @@ def run_serial(port_name):
         try:
             with serial.Serial(port, BAUD, timeout=0.02) as ser:
                 print(f"Conectado a {port}. Reenviando a UDP {GODOT_ADDR[0]}:{GODOT_ADDR[1]} (Ctrl+C para salir)")
+                
+                # Enviar configuración de herramienta si existe
+                cfg_candidates = [
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tool_config.json"),
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools", "tool_config.json"),
+                ]
+                for cp in cfg_candidates:
+                    if os.path.exists(cp):
+                        try:
+                            with open(cp, "r") as f:
+                                cfg = json.load(f)
+                            cfg_msg = {"cmd": "CONFIG", "config": cfg}
+                            ser.write((json.dumps(cfg_msg) + "\n").encode())
+                            print(f"  -> Configuracion de herramienta enviada al ESP32 desde {os.path.basename(cp)}")
+                            break
+                        except Exception as e:
+                            print(f"  -> Aviso al cargar configuracion: {e}")
+
                 buf = b""
                 count, t0 = 0, time.time()
                 while True:
@@ -69,6 +101,10 @@ def run_serial(port_name):
                             line = line.strip()
                             if line.startswith(b"{") and line.endswith(b"}"):
                                 out.sendto(line, GODOT_ADDR)
+                                try:
+                                    out.sendto(line, VISION_ADDR)
+                                except Exception:
+                                    pass
                                 count += 1
                         if len(buf) > 2048:
                             buf = b""

@@ -261,9 +261,10 @@ func _add_charts() -> void:
 	travel.set_ideal(lv.travel_band.x, lv.travel_band.y, SessionRecorder.ideal_of(lv.travel_band))
 	grid.add_child(travel)
 
-	var work := SeriesChart.new().configure("Ángulo de trabajo (desvío de 90°)", "tiempo (s)", "grados", Color(1.0, 0.55, 0.55))
+	var work := SeriesChart.new().configure("Ángulo de trabajo", "tiempo (s)", "grados", Color(1.0, 0.55, 0.55))
 	work.set_data(t, _recorder.series("work"))
 	work.set_ideal(lv.work_band.x, lv.work_band.y, SessionRecorder.ideal_of(lv.work_band))
+	work.y_range = Vector2(60.0, 120.0)
 	grid.add_child(work)
 
 	var gap := SeriesChart.new().configure("Longitud de arco (distancia a la chapa)", "tiempo (s)", "mm", Color(0.5, 1.0, 0.8))

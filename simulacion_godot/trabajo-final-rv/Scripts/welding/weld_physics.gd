@@ -12,10 +12,12 @@ const ELECTRODE_LENGTH_MM := 350.0
 const ELECTRODE_STUB_MM := 50.0     # colilla que no se puede consumir
 const PLATE_THICKNESS_MM := 10.0
 
-const STICK_GAP_MM := 0.8           # por debajo: cortocircuito / electrodo pegado
-const OPTIMAL_GAP_MIN_MM := 1.5
-const OPTIMAL_GAP_MAX_MM := 3.5
-const EXTINGUISH_GAP_MM := 6.0      # por encima: el arco se apaga
+static var STICK_GAP_MM: float = 0.4           # por debajo: cortocircuito / electrodo pegado
+static var OPTIMAL_GAP_MIN_MM: float = 1.0
+static var OPTIMAL_GAP_MAX_MM: float = 6.0
+static var EXTINGUISH_GAP_MM: float = 12.0      # por encima: el arco se apaga
+static var REIGNITE_GAP_MM: float = 4.5        # por debajo (y > STICK_GAP): reencendido automático del arco
+static var TOOL_TIP_LEVER_MM: float = 115.0    # distancia punta-marcador ArUco [mm] para compensación cinemática 3D
 
 const MIN_SPEED_MM_S := 0.3         # evita divisiones por cero
 

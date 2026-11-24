@@ -68,6 +68,7 @@ enum SystemState {
 
 SystemState current_state = STATE_IDLE;
 bool arc_active = false;
+bool session_active = false;
 
 // ==============================================================================
 // SENSORES Y OBJETOS
@@ -88,6 +89,13 @@ float current_distance_mm = 0.0f;
 float dynamic_offset_mm = ELECTRODE_LENGTH_OFFSET_MM;
 uint16_t latest_raw_tof = 75;
 
+// Filtros avanzados ToF: Mediana de 5 muestras + Pasa-bajos EMA + Banda muerta
+#define TOF_MEDIAN_SIZE 5
+float tof_buf[TOF_MEDIAN_SIZE] = {0.0f};
+uint8_t tof_buf_idx = 0;
+bool tof_buf_filled = false;
+float smoothed_tof_mm = 0.0f;
+
 // Pulsador y Antirrebote
 bool last_stable_button = HIGH;
 bool last_reading_button = HIGH;
@@ -107,6 +115,34 @@ unsigned long last_telemetry_ms = 0;
 // ==============================================================================
 // CONTROL DE ACTUADORES (LED RGB & MOTOR)
 // ==============================================================================
+// ==============================================================================
+// CONFIGURACIÓN DINÁMICA DE LA HERRAMIENTA (MODIFICABLE POR SERIAL DESDE GUI)
+// ==============================================================================
+struct DynamicConfig {
+    uint8_t idle_r = 255, idle_g = 40, idle_b = 0;        // Naranja cálido
+    uint8_t homing_r = 0, homing_g = 50, homing_b = 255;   // Azul contacto
+    uint8_t weld_ok_r = 0, weld_ok_g = 255, weld_ok_b = 0; // Verde óptimo
+    uint8_t weld_warn_r = 255, weld_warn_g = 0, weld_warn_b = 0; // Rojo advertencia
+    uint8_t sticking_r = 255, sticking_g = 0, sticking_b = 0;    // Rojo pegado
+
+    uint8_t duty_homing = 200;    // ~78%
+    uint8_t duty_weld_ok = 70;    // ~28%
+    uint8_t duty_weld_warn = 125; // ~49%
+    uint8_t duty_sticking = 255;  // 100%
+
+    float stick_gap_mm = 0.4f;
+    float extinguish_gap_mm = 12.0f;
+    float reignite_gap_mm = 4.5f;
+    float opt_min_gap_mm = 1.0f;
+    float opt_max_gap_mm = 6.0f;
+} g_cfg;
+
+// ==============================================================================
+// TEMPORIZADORES DE OVERRIDE PARA PRUEBAS MANUALES (DESDE GUI O COMANDOS)
+// ==============================================================================
+unsigned long test_override_led_until_ms = 0;
+unsigned long test_override_haptic_until_ms = 0;
+
 void set_rgb(uint8_t r, uint8_t g, uint8_t b) {
     ledcWrite(PIN_RGB_R, r);
     ledcWrite(PIN_RGB_G, g);
@@ -117,62 +153,74 @@ void set_motor_duty(uint8_t duty) {
     ledcWrite(PIN_HAPTIC, duty);
 }
 
-void apply_actuators_for_state(SystemState state) {
+void apply_led_for_state(SystemState state) {
     unsigned long now = millis();
-    unsigned long elapsed = now - state_enter_ms;
-
     switch (state) {
         case STATE_IDLE:
-            // Naranja cálido de soplete en reposo
-            set_rgb(255, 40, 0);
-            set_motor_duty(0);
+            set_rgb(g_cfg.idle_r, g_cfg.idle_g, g_cfg.idle_b);
             break;
-
         case STATE_HOMING:
-            // Azul de contacto inicial
-            set_rgb(0, 50, 255);
-            // Pulso seco de cebado durante los primeros 70 ms
-            if (elapsed <= 70) {
-                set_motor_duty(200);
-            } else {
-                set_motor_duty(0);
-            }
+            set_rgb(g_cfg.homing_r, g_cfg.homing_g, g_cfg.homing_b);
             break;
-
         case STATE_WELD_OK:
-            // Verde puro de soldadura óptima
-            set_rgb(0, 255, 0);
-            // Zumbido suave continuo del plasma (~28% de potencia)
-            set_motor_duty(70);
+            set_rgb(g_cfg.weld_ok_r, g_cfg.weld_ok_g, g_cfg.weld_ok_b);
             break;
-
         case STATE_WELD_WARN:
-            // Rojo continuo de técnica defectuosa
-            set_rgb(255, 0, 0);
-            // Patrón pulsante de aviso: 120 ms ON / 90 ms OFF
-            if (now - haptic_pattern_ms > (haptic_toggle ? 120 : 90)) {
-                haptic_pattern_ms = now;
-                haptic_toggle = !haptic_toggle;
-                set_motor_duty(haptic_toggle ? 125 : 0);
-            }
+            set_rgb(g_cfg.weld_warn_r, g_cfg.weld_warn_g, g_cfg.weld_warn_b);
             break;
-
         case STATE_STICKING:
-            // Rojo continuo
-            set_rgb(255, 0, 0);
-            // ¡Vibración violenta al 100%!
-            set_motor_duty(255);
+            set_rgb(g_cfg.sticking_r, g_cfg.sticking_g, g_cfg.sticking_b);
             break;
-
         case STATE_ERROR:
-            // Parpadeo a 1 Hz
             if ((now / 500) % 2 == 0) {
                 set_rgb(255, 0, 0);
             } else {
                 set_rgb(0, 0, 0);
             }
+            break;
+    }
+}
+
+void apply_haptic_for_state(SystemState state) {
+    unsigned long now = millis();
+    unsigned long elapsed = now - state_enter_ms;
+    switch (state) {
+        case STATE_IDLE:
             set_motor_duty(0);
             break;
+        case STATE_HOMING:
+            if (elapsed <= 70) {
+                set_motor_duty(g_cfg.duty_homing);
+            } else {
+                set_motor_duty(0);
+            }
+            break;
+        case STATE_WELD_OK:
+            set_motor_duty(g_cfg.duty_weld_ok);
+            break;
+        case STATE_WELD_WARN:
+            if (now - haptic_pattern_ms > (haptic_toggle ? 120 : 90)) {
+                haptic_pattern_ms = now;
+                haptic_toggle = !haptic_toggle;
+                set_motor_duty(haptic_toggle ? g_cfg.duty_weld_warn : 0);
+            }
+            break;
+        case STATE_STICKING:
+            set_motor_duty(g_cfg.duty_sticking);
+            break;
+        case STATE_ERROR:
+            set_motor_duty(0);
+            break;
+    }
+}
+
+void apply_actuators_for_state(SystemState state) {
+    unsigned long now = millis();
+    if (now >= test_override_led_until_ms) {
+        apply_led_for_state(state);
+    }
+    if (now >= test_override_haptic_until_ms) {
+        apply_haptic_for_state(state);
     }
 }
 
@@ -297,15 +345,53 @@ void update_imu() {
 void update_tof() {
     if (distanceSensor.dataReady()) {
         uint16_t dist = distanceSensor.read(false);
-        // Descartar lecturas fuera de rango o errores de timeout
-        if (dist > 0 && dist < 1500) {
+        uint8_t status = distanceSensor.ranging_data.range_status;
+
+        // Descartar lecturas con error óptico o fuera de rango físico razonable (< 1200 mm)
+        // status 0: Rango válido, status 7: Wraparound
+        if (dist > 10 && dist < 1200 && (status == 0 || status == 7)) {
             latest_raw_tof = dist;
+
             // Si el pulsador físico está en contacto con la chapa, la distancia es estrictamente 0.0 mm
             if (last_stable_button == LOW) {
                 current_distance_mm = 0.0f;
+                smoothed_tof_mm = 0.0f;
             } else {
                 float net_gap = (float)dist - dynamic_offset_mm;
-                current_distance_mm = (net_gap < 0.0f) ? 0.0f : net_gap;
+                if (net_gap < 0.0f) net_gap = 0.0f;
+
+                // 1. Filtro de Mediana (elimina picos repentinos y reflexiones parásitas)
+                tof_buf[tof_buf_idx] = net_gap;
+                tof_buf_idx = (tof_buf_idx + 1) % TOF_MEDIAN_SIZE;
+                if (tof_buf_idx == 0) tof_buf_filled = true;
+
+                float median_gap = net_gap;
+                if (tof_buf_filled) {
+                    float s[TOF_MEDIAN_SIZE];
+                    for (int i = 0; i < TOF_MEDIAN_SIZE; i++) s[i] = tof_buf[i];
+                    for (int i = 0; i < TOF_MEDIAN_SIZE - 1; i++) {
+                        for (int j = i + 1; j < TOF_MEDIAN_SIZE; j++) {
+                            if (s[i] > s[j]) {
+                                float tmp = s[i];
+                                s[i] = s[j];
+                                s[j] = tmp;
+                            }
+                        }
+                    }
+                    median_gap = s[TOF_MEDIAN_SIZE / 2];
+                }
+
+                // 2. Filtro Pasa-Bajos Exponencial (EMA: 70% inercia / 30% nueva muestra)
+                if (smoothed_tof_mm <= 0.01f && median_gap > 0.0f) {
+                    smoothed_tof_mm = median_gap;
+                } else {
+                    smoothed_tof_mm = 0.70f * smoothed_tof_mm + 0.30f * median_gap;
+                }
+
+                // 3. Banda Muerta (Deadband de 0.25 mm) para eliminar temblor cuántico del último decimal
+                if (fabs(smoothed_tof_mm - current_distance_mm) >= 0.25f) {
+                    current_distance_mm = smoothed_tof_mm;
+                }
             }
         }
     }
@@ -337,8 +423,9 @@ void update_button() {
                     dynamic_offset_mm = (float)latest_raw_tof;
                 }
 
-                // Si estábamos en espera, cebamos el arco
-                if (!arc_active) {
+                // Si la sesión no ha comenzado, este primer contacto es el cebado / homing
+                if (!session_active) {
+                    session_active = true;
                     arc_active = true;
                     set_state(STATE_HOMING);
                 }
@@ -355,11 +442,14 @@ void update_button() {
         current_distance_mm = 0.0f;
     }
 
-    // Detección de pulsación larga (> 2 segundos) para TARA
+    // Detección de pulsación larga (> 2 segundos) para TARA y REINICIO DE SESIÓN
     if (last_stable_button == LOW && !long_press_handled) {
         if (millis() - press_start_ms >= 2000) {
             long_press_handled = true;
             yaw = 0.0f; // Restablecer orientación
+            session_active = false;
+            arc_active = false;
+            set_state(STATE_IDLE);
             // Confirmación visual con destello azul
             set_rgb(0, 0, 255); delay(100);
             set_rgb(0, 0, 0);   delay(100);
@@ -374,39 +464,63 @@ void update_button() {
 // EVALUACIÓN DE LA FÍSICA Y TRANSICIÓN DE ESTADOS SMAW
 // ==============================================================================
 void evaluate_fsm() {
-    if (!arc_active) {
+    // Si la sesión no está activa (aún no se hizo homing inicial), permanecemos en IDLE
+    if (!session_active) {
         set_state(STATE_IDLE);
         return;
     }
 
-    // 1. Corte de arco por separación excesiva de la punta (> 12.0 mm)
-    if (current_distance_mm > 12.0f && last_stable_button == HIGH) {
+    // 1. Condición de electrodo pegado (STICKING):
+    // Si la punta toca físicamente la chapa (botón apretado) o distancia ToF <= stick_gap
+    if (last_stable_button == LOW || current_distance_mm <= g_cfg.stick_gap_mm) {
+        // En el instante justo del homing permitimos el pulso táctil inicial de cebado (~80ms)
+        if (current_state == STATE_HOMING && (millis() - state_enter_ms <= 80)) {
+            return;
+        }
+        set_state(STATE_STICKING);
+        return;
+    }
+
+    // 2. Si estábamos en STATE_STICKING y el operario despega la punta (> stick_gap):
+    // El arco se restablece automáticamente
+    if (current_state == STATE_STICKING) {
+        arc_active = true;
+    }
+
+    // 3. Salida de STATE_HOMING al despegar la punta:
+    if (current_state == STATE_HOMING) {
+        if (current_distance_mm > g_cfg.stick_gap_mm && (millis() - state_enter_ms > 70)) {
+            arc_active = true;
+            if (current_distance_mm <= g_cfg.opt_max_gap_mm) {
+                set_state(STATE_WELD_OK);
+            } else {
+                set_state(STATE_WELD_WARN);
+            }
+        }
+        return;
+    }
+
+    // 4. Si el arco se había extinguido por distancia excesiva:
+    if (!arc_active) {
+        // Reencendido automático por proximidad (sin requerir pulsar de nuevo)
+        if (current_distance_mm <= g_cfg.reignite_gap_mm && current_distance_mm > g_cfg.stick_gap_mm) {
+            arc_active = true;
+        } else {
+            set_state(STATE_IDLE);
+            return;
+        }
+    }
+
+    // 5. Corte de arco por separación excesiva (> extinguish_gap)
+    if (current_distance_mm > g_cfg.extinguish_gap_mm) {
         arc_active = false;
         set_state(STATE_IDLE);
         return;
     }
 
-    // 2. Electrodo pegado (cortocircuito: punta a <= 0.4 mm O pulsador apretado durante soldadura)
-    if ((current_distance_mm <= 0.4f && last_stable_button == LOW) || 
-        (last_stable_button == LOW && (millis() - press_start_ms > 250))) {
-        set_state(STATE_STICKING);
-        return;
-    }
-
-    // 3. Salida de Homing al separar la punta a distancia de arco (> 0.8 mm)
-    if (current_state == STATE_HOMING) {
-        if (current_distance_mm > 0.8f && (millis() - state_enter_ms > 70)) {
-            set_state(STATE_WELD_OK);
-        }
-        return;
-    }
-
-    // 4. Evaluación de técnica de soldadura SMAW (Rango pedagógico ampliado):
-    // Distancia de arco óptima: 1.0 mm a 6.0 mm (muy tolerante al pulso humano)
-    bool dist_ok = (current_distance_mm >= 1.0f && current_distance_mm <= 6.0f);
-    // Ángulo de trabajo / Roll óptimo: hasta +/- 25° de desviación
+    // 6. Evaluación de técnica de soldadura SMAW durante arco encendido:
+    bool dist_ok = (current_distance_mm >= g_cfg.opt_min_gap_mm && current_distance_mm <= g_cfg.opt_max_gap_mm);
     bool roll_ok = (fabs(roll) < 25.0f);
-    // Ángulo de avance / Pitch: entre -5° y +35°
     bool pitch_ok = (pitch >= -5.0f && pitch <= 35.0f);
 
     if (dist_ok && roll_ok && pitch_ok) {
@@ -426,7 +540,43 @@ void send_telemetry() {
 }
 
 // ==============================================================================
-// PARSER DE COMANDOS ENTRANTE DESDE GODOT / CONSOLA
+// HELPERS NATIVOS DE PARSEO (CERO DEPENDENCIAS EXTERNAS)
+// ==============================================================================
+static int extract_int(const String& s, const char* key, int def_val) {
+    int idx = s.indexOf(key);
+    if (idx < 0) return def_val;
+    int colon = s.indexOf(':', idx);
+    if (colon < 0) return def_val;
+    return s.substring(colon + 1).toInt();
+}
+
+static float extract_float(const String& s, const char* key, float def_val) {
+    int idx = s.indexOf(key);
+    if (idx < 0) return def_val;
+    int colon = s.indexOf(':', idx);
+    if (colon < 0) return def_val;
+    return s.substring(colon + 1).toFloat();
+}
+
+static void extract_rgb(const String& s, const char* key, uint8_t& r, uint8_t& g, uint8_t& b) {
+    int idx = s.indexOf(key);
+    if (idx < 0) return;
+    int b1 = s.indexOf('[', idx);
+    int b2 = s.indexOf(']', b1);
+    if (b1 >= 0 && b2 > b1) {
+        String sub = s.substring(b1 + 1, b2);
+        int c1 = sub.indexOf(',');
+        int c2 = sub.indexOf(',', c1 + 1);
+        if (c1 > 0 && c2 > c1) {
+            r = (uint8_t)constrain(sub.substring(0, c1).toInt(), 0, 255);
+            g = (uint8_t)constrain(sub.substring(c1 + 1, c2).toInt(), 0, 255);
+            b = (uint8_t)constrain(sub.substring(c2 + 1).toInt(), 0, 255);
+        }
+    }
+}
+
+// ==============================================================================
+// PARSER DE COMANDOS ENTRANTE DESDE GODOT / CONSOLA / GUI
 // ==============================================================================
 void handle_serial_commands() {
     if (!Serial.available()) return;
@@ -440,6 +590,62 @@ void handle_serial_commands() {
         yaw = 0.0f;
     } else if (line.length() == 1 && line[0] >= '0' && line[0] <= '6') {
         set_dlpf(line[0] - '0');
+    } else if (line.indexOf("TEST_ACTUATOR") >= 0) {
+        uint8_t r = (uint8_t)constrain(extract_int(line, "\"r\"", 0), 0, 255);
+        uint8_t g = (uint8_t)constrain(extract_int(line, "\"g\"", 0), 0, 255);
+        uint8_t b = (uint8_t)constrain(extract_int(line, "\"b\"", 0), 0, 255);
+        int ms = extract_int(line, "\"ms\"", 2500); // Duración de prueba visual en ms (por defecto 2.5 s)
+        set_rgb(r, g, b);
+        test_override_led_until_ms = millis() + ms;
+        Serial.printf("{\"ack\":\"TEST_ACTUATOR\",\"r\":%d,\"g\":%d,\"b\":%d,\"ms\":%d}\n", r, g, b, ms);
+    } else if (line.indexOf("SET_HAPTIC") >= 0) {
+        int duty = extract_int(line, "\"val\"", 0);
+        int ms = extract_int(line, "\"ms\"", 0);
+        if (ms > 0) {
+            // Comando de prueba explícito desde GUI con temporizador en ms
+            set_motor_duty((uint8_t)constrain(duty, 0, 255));
+            test_override_haptic_until_ms = millis() + ms;
+            Serial.printf("{\"ack\":\"SET_HAPTIC\",\"val\":%d,\"ms\":%d}\n", duty, ms);
+        } else {
+            // Streaming continuo desde el simulador Godot
+            if (session_active && duty > 0) {
+                set_motor_duty((uint8_t)constrain(duty, 0, 255));
+                test_override_haptic_until_ms = millis() + 150; // ventana activa de 150 ms
+            } else {
+                test_override_haptic_until_ms = 0;
+                set_motor_duty(0);
+            }
+        }
+    } else if (line.indexOf("RESET") >= 0 || line.indexOf("END_SESSION") >= 0) {
+        session_active = false;
+        arc_active = false;
+        test_override_haptic_until_ms = 0;
+        set_motor_duty(0);
+        set_state(STATE_IDLE);
+        Serial.println("{\"ack\":\"SESSION_RESET\"}");
+    } else if (line.indexOf("CONFIG") >= 0) {
+        extract_rgb(line, "\"idle\"", g_cfg.idle_r, g_cfg.idle_g, g_cfg.idle_b);
+        extract_rgb(line, "\"homing\"", g_cfg.homing_r, g_cfg.homing_g, g_cfg.homing_b);
+        extract_rgb(line, "\"weld_optimal\"", g_cfg.weld_ok_r, g_cfg.weld_ok_g, g_cfg.weld_ok_b);
+        extract_rgb(line, "\"weld_warning\"", g_cfg.weld_warn_r, g_cfg.weld_warn_g, g_cfg.weld_warn_b);
+        extract_rgb(line, "\"sticking\"", g_cfg.sticking_r, g_cfg.sticking_g, g_cfg.sticking_b);
+
+        if (line.indexOf("\"stick_gap\"") >= 0) g_cfg.stick_gap_mm = extract_float(line, "\"stick_gap\"", g_cfg.stick_gap_mm);
+        if (line.indexOf("\"extinguish_gap\"") >= 0) g_cfg.extinguish_gap_mm = extract_float(line, "\"extinguish_gap\"", g_cfg.extinguish_gap_mm);
+        if (line.indexOf("\"reignite_gap\"") >= 0) g_cfg.reignite_gap_mm = extract_float(line, "\"reignite_gap\"", g_cfg.reignite_gap_mm);
+        if (line.indexOf("\"optimal_min\"") >= 0) g_cfg.opt_min_gap_mm = extract_float(line, "\"optimal_min\"", g_cfg.opt_min_gap_mm);
+        if (line.indexOf("\"optimal_max\"") >= 0) g_cfg.opt_max_gap_mm = extract_float(line, "\"optimal_max\"", g_cfg.opt_max_gap_mm);
+
+        int h_hom = extract_int(line, "\"homing\"", -1);
+        if (h_hom >= 0 && line.indexOf("\"haptic_intensity_pct\"") >= 0) g_cfg.duty_homing = (uint8_t)(constrain(h_hom, 0, 100) * 2.55f);
+        int h_weld = extract_int(line, "\"weld_optimal\"", -1);
+        if (h_weld >= 0 && line.indexOf("\"haptic_intensity_pct\"") >= 0) g_cfg.duty_weld_ok = (uint8_t)(constrain(h_weld, 0, 100) * 2.55f);
+        int h_warn = extract_int(line, "\"weld_warning\"", -1);
+        if (h_warn >= 0 && line.indexOf("\"haptic_intensity_pct\"") >= 0) g_cfg.duty_weld_warn = (uint8_t)(constrain(h_warn, 0, 100) * 2.55f);
+        int h_stk = extract_int(line, "\"sticking\"", -1);
+        if (h_stk >= 0 && line.indexOf("\"haptic_intensity_pct\"") >= 0) g_cfg.duty_sticking = (uint8_t)(constrain(h_stk, 0, 100) * 2.55f);
+
+        Serial.println("{\"ack\":\"CONFIG_APPLIED\"}");
     }
 }
 
@@ -448,6 +654,7 @@ void handle_serial_commands() {
 // ==============================================================================
 void setup() {
     Serial.begin(115200);
+    Serial.setTimeout(5);
 
     // Pines de salida
     pinMode(PIN_STATUS_LED, OUTPUT);
@@ -491,14 +698,18 @@ void setup() {
     distanceSensor.setTimeout(500);
     if (distanceSensor.init()) {
         distanceSensor.setDistanceMode(VL53L1X::Short);
-        distanceSensor.setMeasurementTimingBudget(20000); // 20 ms (50 Hz)
-        distanceSensor.startContinuous(20);
+        distanceSensor.setMeasurementTimingBudget(40000); // 40 ms (mayor integración de fotones y menor dispersión)
+        distanceSensor.startContinuous(40);
         tof_online = true;
     } else {
         tof_online = false;
         set_state(STATE_ERROR);
     }
 
+    session_active = false;
+    arc_active = false;
+    test_override_haptic_until_ms = 0;
+    set_motor_duty(0);
     set_state(STATE_IDLE);
     last_telemetry_ms = millis();
 }

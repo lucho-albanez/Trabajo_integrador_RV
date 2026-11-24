@@ -78,6 +78,8 @@ var _hw_gap_valid: bool = false
 var _hw_gap_msec: int = 0
 var _hw_trigger: bool = false
 var _hw_travel: Vector2 = Vector2.ZERO
+var has_absolute_position: bool = false
+var hw_abs_pos_mm: Vector2 = Vector2.ZERO
 var _tare_pending: bool = false
 var _tare_delay: float = 0.0
 
@@ -91,10 +93,50 @@ var _sim_travel: Vector2 = Vector2.ZERO
 var _haptic_last: Array[int] = [-1, -1]
 var _haptic_last_msec: Array[int] = [0, 0]
 
+var tool_config: Dictionary = {}
+
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_try_bind()
+	load_tool_config()
+
+
+func load_tool_config() -> void:
+	var path := "res://tool_config.json"
+	if not FileAccess.file_exists(path):
+		return
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return
+	var json := JSON.new()
+	var err := json.parse(file.get_as_text())
+	if err == OK and typeof(json.data) == TYPE_DICTIONARY:
+		tool_config = json.data
+		_apply_tool_config()
+		print("DeviceLink: Configuracion de herramienta cargada desde tool_config.json")
+
+
+func _apply_tool_config() -> void:
+	if tool_config.has("tof_limits_mm"):
+		var limits: Dictionary = tool_config["tof_limits_mm"]
+		if limits.has("stick_gap"):
+			WeldPhysics.STICK_GAP_MM = float(limits["stick_gap"])
+		if limits.has("extinguish_gap"):
+			WeldPhysics.EXTINGUISH_GAP_MM = float(limits["extinguish_gap"])
+		if limits.has("optimal_min"):
+			WeldPhysics.OPTIMAL_GAP_MIN_MM = float(limits["optimal_min"])
+		if limits.has("optimal_max"):
+			WeldPhysics.OPTIMAL_GAP_MAX_MM = float(limits["optimal_max"])
+		if limits.has("reignite_gap"):
+			WeldPhysics.REIGNITE_GAP_MM = float(limits["reignite_gap"])
+	if tool_config.has("tool_tip_lever_mm"):
+		WeldPhysics.TOOL_TIP_LEVER_MM = float(tool_config["tool_tip_lever_mm"])
+		print("DeviceLink: Brazo cinematico punta-marcador configurado en %.1f mm" % WeldPhysics.TOOL_TIP_LEVER_MM)
+		print("DeviceLink: Limites ToF actualizados -> Optimo: [%.1f - %.1f] mm, Pegado: <= %.1f mm, Extincion: >= %.1f mm, Reencendido: <= %.1f mm" % [
+			WeldPhysics.OPTIMAL_GAP_MIN_MM, WeldPhysics.OPTIMAL_GAP_MAX_MM,
+			WeldPhysics.STICK_GAP_MM, WeldPhysics.EXTINGUISH_GAP_MM, WeldPhysics.REIGNITE_GAP_MM
+		])
 
 
 func _exit_tree() -> void:
@@ -349,7 +391,12 @@ func _handle_line(line: String) -> void:
 			if Time.get_ticks_msec() - _hw_gap_msec > 200:
 				_hw_gap_valid = false
 		else:
-			_hw_gap_mm = maxf(dist * distance_scale + distance_offset_mm, 0.0)
+			var target_gap := maxf(dist * distance_scale + distance_offset_mm, 0.0)
+			if not _hw_gap_valid:
+				_hw_gap_mm = target_gap
+			else:
+				# Suavizado pasa-bajos del 40% para eliminar micro-fluctuación cuántica del ToF
+				_hw_gap_mm = lerpf(_hw_gap_mm, target_gap, 0.40)
 			_hw_gap_valid = true
 			_hw_gap_msec = Time.get_ticks_msec()
 	if d.has("b"):
@@ -357,6 +404,10 @@ func _handle_line(line: String) -> void:
 	if d.has("dx") and d.has("dy"):
 		has_position_tracking = true
 		_hw_travel += Vector2(float(d["dx"]), float(d["dy"]))
+	if d.has("x") and d.has("y"):
+		has_position_tracking = true
+		has_absolute_position = true
+		hw_abs_pos_mm = Vector2(float(d["x"]), float(d["y"]))
 
 
 func _apply_quaternion(w: float, x: float, y: float, z: float) -> void:
@@ -381,6 +432,7 @@ func _update_connection(delta: float) -> void:
 		if not now_connected:
 			_hw_trigger = false
 			has_position_tracking = false
+			has_absolute_position = false
 			packet_rate_hz = 0.0
 			for m in 2:
 				_haptic_last[m] = -1

@@ -48,7 +48,7 @@ func _process(_delta: float) -> void:
 	# Mostrar ángulos calculados y distancia de arco real
 	var angles: Vector2 = WeldGeometry.angles_from_up(DeviceLink.get_tool_up())
 	var gap_str := "%.1f mm" % gap if is_finite(gap) else "-- mm"
-	lbl_angles.text = "Trabajo: %+.1f°  |  Avance: %+.1f°  |  Dist. Punta: %s" % [angles.x, angles.y, gap_str]
+	lbl_angles.text = "Trabajo: %.1f° (ideal 90°)  |  Avance: %+.1f°  |  Dist. Punta: %s" % [90.0 + angles.x, angles.y, gap_str]
 
 	# Mostrar pulsador
 	var trig: bool = DeviceLink.get_trigger()

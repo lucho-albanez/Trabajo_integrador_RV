@@ -26,6 +26,7 @@ var state: int = State.OFF
 var zone: int = Zone.NONE
 var time_in_arc: float = 0.0           # s desde el último cebado
 var gap_mm: float = 0.0
+var session_active: bool = false       # Sesión de soldadura iniciada por homing inicial
 
 var _prev_trigger: bool = false
 var _needs_release: bool = false
@@ -45,50 +46,71 @@ func step(delta: float, trigger: bool, gap: float, energized: bool, over_plate: 
 	gap_mm = gap
 	var rising := trigger and not _prev_trigger
 	_prev_trigger = trigger
-	if not trigger:
-		_needs_release = false
+
+	# Iniciar sesión con el primer pulso de homing / cebado
+	if rising:
+		session_active = true
 
 	match state:
 		State.OFF:
 			zone = Zone.NONE
-			if rising and not _needs_release:
+			if rising:
 				_try_strike(gap, energized, over_plate)
+			elif session_active and energized and over_plate:
+				# Si la sesión ya inició, reencendido por proximidad
+				var reignite_thresh: float = WeldPhysics.REIGNITE_GAP_MM if "REIGNITE_GAP_MM" in WeldPhysics else strike_max_gap_mm
+				if gap <= reignite_thresh and gap > WeldPhysics.STICK_GAP_MM and not trigger:
+					_set_state(State.ARCING, "reignited")
+
 		State.ARCING:
 			time_in_arc += delta
 			zone = _zone_for(gap)
-			if not trigger:
-				_set_state(State.OFF, "released")
-			elif not energized:
-				_set_state(State.OFF, "no_circuit")
+
+			if not energized:
+				_set_state(State.OUT, "no_circuit")
 			elif not over_plate:
-				_set_state(State.OFF, "off_plate")
+				_set_state(State.OUT, "off_plate")
 			else:
-				_low_timer = _low_timer + delta if gap <= WeldPhysics.STICK_GAP_MM else 0.0
+				# Pegado: pulsador presionado O distancia menor/igual al gap de sticking
+				var sticking_cond := trigger or gap <= WeldPhysics.STICK_GAP_MM
+				_low_timer = _low_timer + delta if sticking_cond else 0.0
 				_high_timer = _high_timer + delta if gap >= WeldPhysics.EXTINGUISH_GAP_MM else 0.0
+
 				if _low_timer >= stick_time_s:
-					_needs_release = true
 					_set_state(State.STUCK, "stuck")
 				elif _high_timer >= extinguish_time_s:
-					_needs_release = true
 					_set_state(State.OUT, "too_long")
+
 		State.STUCK:
 			zone = Zone.NONE
-			if gap >= free_gap_mm:
+			if gap >= free_gap_mm and not trigger:
+				_low_timer = 0.0
 				_set_state(State.OFF, "freed")
+
 		State.OUT:
 			zone = Zone.NONE
-			if not trigger:
-				_set_state(State.OFF, "reset")
+			var reignite_thresh: float = WeldPhysics.REIGNITE_GAP_MM if "REIGNITE_GAP_MM" in WeldPhysics else strike_max_gap_mm
+			if session_active and energized and over_plate:
+				# Reencendido automático al arrimar la herramienta
+				if gap <= reignite_thresh and gap > WeldPhysics.STICK_GAP_MM and not trigger:
+					time_in_arc = 0.0
+					_low_timer = 0.0
+					_high_timer = 0.0
+					_set_state(State.ARCING, "reignited")
+			elif rising:
+				_try_strike(gap, energized, over_plate)
 
 
 ## Apaga el arco desde afuera (electrodo agotado, fin del ejercicio...).
 func force_off(reason: String) -> void:
+	session_active = false
 	if state != State.OFF:
 		_needs_release = true
 		_set_state(State.OFF, reason)
 
 
 func reset() -> void:
+	session_active = false
 	state = State.OFF
 	zone = Zone.NONE
 	time_in_arc = 0.0

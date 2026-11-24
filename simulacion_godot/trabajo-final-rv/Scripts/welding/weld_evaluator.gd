@@ -267,7 +267,7 @@ func _category_details(coverage: float) -> Dictionary:
 	return {
 		"arc_length": ("Promedio %.1f mm (objetivo %s)" % [_arc.mean, _band_text(level.arc_length_band, "mm")]) if has else na,
 		"speed": ("Promedio %.1f mm/s (objetivo %s)" % [_speed.mean, _band_text(level.speed_band, "mm/s")]) if _speed.wsum > 0.0 else na,
-		"work_angle": ("Desvío medio %+.1f° respecto de 90° (tolerancia ±%.0f°)" % [_work.mean, level.work_band.y]) if has else na,
+		"work_angle": ("Promedio %.1f° (ideal 90°, tol %.0f°-%.0f°)" % [_work.mean, level.work_band.z, level.work_band.w]) if has else na,
 		"travel_angle": ("Promedio %.1f° de arrastre (objetivo %s)" % [_travel.mean, _band_text(level.travel_band, "°")]) if has else na,
 		"current": "%.0f A (objetivo %s para E6013 Ø3,2 mm)" % [current_a, _band_text(level.current_band, "A")],
 		"path": ("Desvío medio %.1f mm del eje (tolerancia %.1f mm)" % [_lateral.mean, level.lateral_band.y]) if has else na,
@@ -299,8 +299,8 @@ func _diagnostics(coverage: float, welded: bool) -> Array[Dictionary]:
 		elif _speed.mean < level.speed_band.x:
 			out.append({"severity": "warn", "text": "Avance demasiado lento: cordón ancho y alto, exceso de aporte térmico e inclusiones de escoria. Avanzá más rápido."})
 	# Ángulos
-	if absf(_work.mean) > level.work_band.y:
-		out.append({"severity": "warn", "text": "Ángulo de trabajo desviado %.0f° de la perpendicular: el aporte de calor queda desbalanceado entre las dos chapas (falta de fusión de un lado)." % _work.mean})
+	if _work.mean < level.work_band.z or _work.mean > level.work_band.w:
+		out.append({"severity": "warn", "text": "Ángulo de trabajo desviado (promedio %.0f°): el aporte de calor queda desbalanceado entre las dos chapas (falta de fusión de un lado). Ideal 90° (tolerancia %.0f°-%.0f°)." % [_work.mean, level.work_band.z, level.work_band.w]})
 	if _travel.mean < level.travel_band.x:
 		out.append({"severity": "warn", "text": "Ángulo de avance insuficiente o en empuje: la escoria se adelanta al baño y hay inclusiones de escoria. Usá arrastre de 5-15°."})
 	elif _travel.mean > level.travel_band.y:
@@ -320,7 +320,7 @@ func _diagnostics(coverage: float, welded: bool) -> Array[Dictionary]:
 		out.append({"severity": "bad", "text": "Mordedura estimada de %.1f mm: supera el límite de 1 mm de la inspección visual AWS D1.1." % _max_undercut})
 	# Trayectoria y regularidad
 	if _lateral.mean > level.lateral_band.y:
-		out.append({"severity": "warn", "text": "El cordón se desvió %.1f mm del eje de la junta: guiá la punta sobre la raíz." % _lateral.mean})
+		out.append({"severity": "warn", "text": "El cordón se desvió %.1f mm del eje de la junta (tolerancia máx %.1f mm): guiá la punta sobre la raíz." % [_lateral.mean, level.lateral_band.y]})
 	if _width.mean > 0.0 and _width.stdev() / _width.mean > 0.2:
 		out.append({"severity": "warn", "text": "Ancho irregular del cordón: practicá un avance y una distancia de arco constantes."})
 	# Cobertura

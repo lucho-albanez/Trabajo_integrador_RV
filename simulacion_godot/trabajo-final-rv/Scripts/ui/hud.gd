@@ -61,7 +61,7 @@ func setup(level_config: LevelConfig) -> void:
 	level = level_config
 	_arc_gauge.configure("Longitud de arco", "mm", 0.0, 8.0, level.arc_length_band, 1)
 	_speed_gauge.configure("Velocidad de avance", "mm/s", 0.0, 8.0, level.speed_band, 1)
-	_work_gauge.configure("Ángulo de trabajo (desvío)", "°", -30.0, 30.0, level.work_band, 0)
+	_work_gauge.configure("Ángulo de trabajo", "°", 60.0, 120.0, level.work_band, 0)
 	_travel_gauge.configure("Ángulo de avance (arrastre)", "°", -15.0, 45.0, level.travel_band, 0)
 	_arc_gauge.visible = level.show_arc_gauge
 	_speed_gauge.visible = level.show_speed_gauge
@@ -317,7 +317,7 @@ func _build_guides(root: Control) -> void:
 	_guide_panel.add_child(box)
 	_guide_title = _label(box, 15)
 	_guide_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
-	for entry in [["gap", "Distancia a la chapa"], ["work", "Ángulo de trabajo"], ["travel", "Ángulo de avance (inclinación)"], ["speed", "Velocidad de avance"], ["current", "Corriente"]]:
+	for entry in [["gap", "Distancia a la chapa"], ["work", "Ángulo de trabajo"], ["travel", "Ángulo de avance (inclinación)"], ["path", "Trayectoria en la junta"], ["speed", "Velocidad de avance"], ["current", "Corriente"]]:
 		var key: String = entry[0]
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 8)

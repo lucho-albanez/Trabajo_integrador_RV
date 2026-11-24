@@ -1,0 +1,51 @@
+{
+  "led_colors": {
+    "idle": [
+      105,
+      15,
+      150
+    ],
+    "homing": [
+      0,
+      50,
+      255
+    ],
+    "weld_optimal": [
+      0,
+      255,
+      0
+    ],
+    "weld_warning": [
+      255,
+      0,
+      0
+    ],
+    "sticking": [
+      255,
+      0,
+      0
+    ]
+  },
+  "haptic_intensity_pct": {
+    "homing": 100,
+    "weld_optimal": 50,
+    "weld_warning": 72,
+    "sticking": 100
+  },
+  "tof_limits_mm": {
+    "extinguish_gap": 12.0,
+    "stick_gap": 0.4,
+    "reignite_gap": 4.5,
+    "optimal_min": 1.0,
+    "optimal_max": 6.0
+  },
+  "simulation_tolerances": {
+    "roll_max_deg": 25.0,
+    "pitch_min_deg": -5.0,
+    "pitch_max_deg": 35.0,
+    "speed_min_mm_s": 1.8,
+    "speed_max_mm_s": 4.5
+  },
+  "tool_tip_lever_mm": 115.0,
+  "godot_executable": ""
+}

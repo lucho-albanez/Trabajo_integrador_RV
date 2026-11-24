@@ -60,6 +60,10 @@ var _was_mask_violation: bool = false
 var _last_depleted_msg_msec: int = 0
 var _last_width: float = 0.0
 var _last_pen: float = 0.0
+var _prev_trigger_edge: bool = false
+var _homing_done: bool = false
+var _home_up: Vector3 = Vector3.UP
+var _home_marker_pos: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -269,7 +273,12 @@ func _run_calibration() -> void:
 func _begin_welding() -> void:
 	evaluator.setup(level, _current_a)
 	recorder.setup(level, _current_a)
+	_homing_done = false
+	_home_up = Vector3.UP
+	_home_marker_pos = Vector2.ZERO
 	arc.reset()
+	DeviceLink.send_command({"cmd": "RESET"})
+	DeviceLink.stop_haptics()
 	_s_mm = 0.0
 	_v_mm = 0.0
 	_speed_smooth = 0.0
@@ -279,17 +288,19 @@ func _begin_welding() -> void:
 	DeviceLink.consume_travel_mm()  # descarta el movimiento acumulado
 	DeviceLink.sim_capture = true
 	_set_state(State.WELDING)
-	_place_holder(INF)
-	hud.show_message("Bajá la careta (Q), acercá la punta a la chapa y mantené el clic izquierdo (o el botón) para cebar el arco.", 6.0)
+	_place_holder(0.0)
+	hud.show_message("Bajá la careta (Q), apoyá la punta en el inicio del cordón (punto de homing) para iniciar.", 6.0)
 
 
 func finish_exercise() -> void:
 	if state != State.WELDING:
 		return
+	_homing_done = false
 	arc.force_off("finished")
 	_apply_feedback(false, 0.0)
 	DeviceLink.sim_capture = false
 	DeviceLink.test_trigger = false
+	DeviceLink.send_command({"cmd": "RESET"})
 	DeviceLink.stop_haptics()
 	player.mask_hud.set_arc(false)
 	player.mask_hud.set_down(false)
@@ -347,7 +358,7 @@ func _update_calibration_ui() -> void:
 
 func _update_welding_ui() -> void:
 	var gap := DeviceLink.get_arc_gap_mm()
-	hud.update_gauges(gap if is_finite(gap) else 0.0, is_finite(gap), _speed_smooth, _angles.x, _angles.y)
+	hud.update_gauges(gap if is_finite(gap) else 0.0, is_finite(gap), _speed_smooth, 90.0 + _angles.x, _angles.y)
 	hud.set_amperage(_current_a, true)
 	hud.set_electrode(holder.remaining_fraction(), holder.length_mm, holder.electrodes_used)
 	hud.set_progress(clampf(_s_mm / coupon.seam_length_mm, 0.0, 1.0), coupon.bead.coverage())
@@ -425,14 +436,17 @@ func _guide_tiles(gap: float) -> Array:
 	else:
 		tiles.append({"key": "gap", "state": 2, "hint": "Sin lectura del sensor",
 			"detail": "Ideal: %.1f mm  (%.1f a %.1f)" % [SessionRecorder.ideal_of(lv.arc_length_band), lv.arc_length_band.x, lv.arc_length_band.y]})
-	# Ángulo de trabajo (desvío respecto de la perpendicular)
+	# Ángulo de trabajo (90° ideal perpendicular a la chapa)
 	var whint := "Correcto"
-	if _angles.x < lv.work_band.x:
+	var work_abs := 90.0 + _angles.x
+	if work_abs < lv.work_band.z:
 		whint = "Inclinar hacia el otro lado"
-	elif _angles.x > lv.work_band.y:
-		whint = "Enderezar el electrodo"
-	tiles.append({"key": "work", "state": _band_state(_angles.x, lv.work_band), "hint": whint,
-		"detail": _detail(str(_angles.x), lv.work_band, "°", 0)})
+	elif work_abs > lv.work_band.w:
+		whint = "Enderezar el electrodo hacia 90°"
+	elif work_abs < lv.work_band.x or work_abs > lv.work_band.y:
+		whint = "Aproximar a 90°"
+	tiles.append({"key": "work", "state": _band_state(work_abs, lv.work_band), "hint": whint,
+		"detail": _detail(str(work_abs), lv.work_band, "°", 0)})
 	# Ángulo de avance (arrastre)
 	var thint := "Correcto"
 	if _angles.y < lv.travel_band.x:
@@ -441,6 +455,15 @@ func _guide_tiles(gap: float) -> Array:
 		thint = "Inclinar menos"
 	tiles.append({"key": "travel", "state": _band_state(_angles.y, lv.travel_band), "hint": thint,
 		"detail": _detail(str(_angles.y), lv.travel_band, "°", 0)})
+	# Trayectoria / Centrado de la punta en la junta
+	var path_hint := "Centrado en junta"
+	var lat_abs := absf(_v_mm)
+	if lat_abs > lv.lateral_band.w:
+		path_hint = "¡Desviado de la junta! Centrar punta"
+	elif lat_abs > lv.lateral_band.y:
+		path_hint = "Leve desvío lateral"
+	tiles.append({"key": "path", "state": _band_state(lat_abs, lv.lateral_band), "hint": path_hint,
+		"detail": "Desvío: %.1f mm  (máx tol: %.1f mm)" % [lat_abs, lv.lateral_band.y]})
 	# Velocidad (solo con el arco encendido)
 	if arc.state == ArcSimulator.State.ARCING and arc.time_in_arc >= SPEED_VALID_AFTER_S:
 		var shint := "Correcta"
@@ -468,16 +491,40 @@ func _guide_tiles(gap: float) -> Array:
 func _step_welding(delta: float) -> void:
 	_weld_time += delta
 
-	# 1) Lectura de la herramienta.
-	var travel := Vector2.ZERO
-	if arc.state != ArcSimulator.State.STUCK:  # pegado a la chapa no se puede avanzar
-		travel = DeviceLink.consume_travel_mm()
-	else:
-		DeviceLink.consume_travel_mm()
+	# 1) Lectura de posición de la herramienta.
 	var prev_s := _s_mm
 	var prev_v := _v_mm
-	_s_mm = clampf(_s_mm + travel.x, -coupon.plate_margin_mm, coupon.seam_length_mm + coupon.plate_margin_mm)
-	_v_mm = clampf(_v_mm + travel.y, -coupon.plate_half_width_mm, coupon.plate_half_width_mm)
+
+	var trigger := DeviceLink.get_trigger()
+
+	# ¡HOMING! Al apoyar físicamente la punta en la mesa y pulsar el microswitch
+	if trigger and not _prev_trigger_edge:
+		_homing_done = true
+		_s_mm = 0.0
+		_v_mm = 0.0
+		_home_up = DeviceLink.get_tool_up().normalized()
+		_home_marker_pos = DeviceLink.hw_abs_pos_mm
+		arc.session_active = true
+		DeviceLink.consume_travel_mm()
+		hud.show_message("¡Homing confirmado en inicio del cordón! Arco activado.", 2.5)
+	_prev_trigger_edge = trigger
+
+	if DeviceLink.has_position_tracking and DeviceLink.has_absolute_position:
+		# Seguimiento óptico con compensación cinemática 3D directa de la punta
+		var target_s := clampf(DeviceLink.hw_abs_pos_mm.x, -coupon.plate_margin_mm, coupon.seam_length_mm + coupon.plate_margin_mm)
+		var target_v := clampf(DeviceLink.hw_abs_pos_mm.y, -coupon.plate_half_width_mm, coupon.plate_half_width_mm)
+		if arc.state != ArcSimulator.State.STUCK:
+			_s_mm = lerpf(_s_mm, target_s, 0.45)
+			_v_mm = lerpf(_v_mm, target_v, 0.45)
+	else:
+		var travel := Vector2.ZERO
+		if arc.state != ArcSimulator.State.STUCK:  # pegado a la chapa no se puede avanzar
+			travel = DeviceLink.consume_travel_mm()
+		else:
+			DeviceLink.consume_travel_mm()
+		_s_mm = clampf(_s_mm + travel.x, -coupon.plate_margin_mm, coupon.seam_length_mm + coupon.plate_margin_mm)
+		_v_mm = clampf(_v_mm + travel.y, -coupon.plate_half_width_mm, coupon.plate_half_width_mm)
+
 	var moved_s := absf(_s_mm - prev_s)
 	var inst_speed := moved_s / delta
 	_speed_smooth = lerpf(_speed_smooth, inst_speed, 1.0 - exp(-delta / SPEED_SMOOTH_TAU_S))
@@ -485,7 +532,6 @@ func _step_welding(delta: float) -> void:
 	var up := DeviceLink.get_tool_up()
 	_angles = WeldGeometry.angles_from_up(up)
 	var gap := DeviceLink.get_arc_gap_mm()
-	var trigger := DeviceLink.get_trigger()
 	var energized := machine.is_on and ground_clamp.is_clamped
 	var over_plate := coupon.is_over_plate(_s_mm, _v_mm)
 
@@ -498,7 +544,11 @@ func _step_welding(delta: float) -> void:
 		trigger = false
 
 	# 2) Simulación del arco.
-	arc.step(delta, trigger, gap, energized, over_plate)
+	if not _homing_done:
+		# Antes de hacer homing: arco apagado y sin vibración
+		arc.force_off("waiting_homing")
+	else:
+		arc.step(delta, trigger, gap, energized, over_plate)
 	var arcing := arc.state == ArcSimulator.State.ARCING
 
 	# 3) Proceso de soldadura.
@@ -510,7 +560,7 @@ func _step_welding(delta: float) -> void:
 	recorder.sample(delta, {
 		"t": _weld_time, "arc": arcing, "s": _s_mm, "v": _v_mm,
 		"speed": _speed_smooth, "gap": gap if is_finite(gap) else 0.0,
-		"work": _angles.x, "travel": _angles.y,
+		"work": 90.0 + _angles.x, "travel": _angles.y,
 		"width": _last_width if arcing else 0.0,
 		"penetration": _last_pen if arcing else 0.0,
 		"mask": player.mask_hud.is_down,
@@ -545,7 +595,7 @@ func _weld_step(delta: float, prev_s: float, prev_v: float, gap: float) -> void:
 	evaluator.add_sample(delta, {
 		"arc_len": gap,
 		"speed": _speed_smooth if arc.time_in_arc >= SPEED_VALID_AFTER_S else -1.0,
-		"work": _angles.x,
+		"work": 90.0 + _angles.x,
 		"travel": _angles.y,
 		"lateral": _v_mm,
 		"width": width,
@@ -574,8 +624,10 @@ func _apply_feedback(arcing: bool, gap: float) -> void:
 	_vfx.set_active(arcing, gap if is_finite(gap) else 2.5, _current_a)
 	_vfx.set_stuck(stuck)
 	player.mask_hud.set_arc(arcing or stuck)
-	var out_of_tolerance := absf(_angles.x) > level.work_band.y \
-		or _angles.y < level.travel_band.x or _angles.y > level.travel_band.y
+	var work_abs := 90.0 + _angles.x
+	var out_of_tolerance := (work_abs < level.work_band.z or work_abs > level.work_band.w) \
+		or (_angles.y < level.travel_band.x or _angles.y > level.travel_band.y) \
+		or (absf(_v_mm) > level.lateral_band.w)
 	_haptics.set_warning(out_of_tolerance)
 
 
@@ -614,15 +666,18 @@ func _on_arc_state_changed(new_state: int, reason: String) -> void:
 		ArcSimulator.State.ARCING:
 			_speed_smooth = 0.0
 			_was_mask_violation = false
+			if reason == "reignited":
+				hud.show_message("Arco reencendido.", 1.5)
 		ArcSimulator.State.STUCK:
 			evaluator.add_stick_event()
-			hud.show_message("¡Electrodo pegado! Alejá la herramienta de la chapa (más de 2,5 mm)", 3.0)
+			hud.show_message("¡Electrodo pegado! Separá la punta para despegar.", 3.0)
 		ArcSimulator.State.OUT:
 			evaluator.add_out_event()
-			hud.show_message("Arco apagado: te separaste demasiado. Soltá el gatillo y cebá de nuevo.", 3.0)
+			if reason == "too_long":
+				hud.show_message("Arco cortado: te alejaste mucho. Acercate a la chapa para reencender.", 3.0)
 		ArcSimulator.State.OFF:
 			if reason == "freed":
-				hud.show_message("Electrodo liberado. Soltá el gatillo y cebá de nuevo.", 2.5)
+				hud.show_message("Electrodo liberado.", 1.5)
 
 
 func _on_strike_failed(reason: String) -> void:
