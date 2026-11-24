@@ -349,7 +349,7 @@ func _handle_line(line: String) -> void:
 	if json.parse(line) != OK or typeof(json.data) != TYPE_DICTIONARY:
 		return
 	var d: Dictionary = json.data
-	if not d.has("d") and not d.has("qw"):
+	if not d.has("d") and not d.has("qw") and not d.has("dx"):
 		return  # acks ({"ack":...}) y otros mensajes
 	_last_packet_msec = Time.get_ticks_msec()
 	packets_received += 1
