@@ -1,0 +1,42 @@
+Conversión de STEP a Solid Edge
+Fecha: viernes,noviembre 20,2026 03:59p. m.
+Archivo fuente: C:\Users\lucia\OneDrive\Documentos\Facultad\5to\SegundoSemestre\RV\Trabajo_Integrador_RV\hardware\3d_models\step\01_carcasa_derecha.step
+Autor: Author
+Organización: Open CASCADE
+Sistema de origen: Open CASCADE 7.9
+
+Equipo:
+Procesador: 12th Gen Intel(R) Core(TM) i5-12450HX
+Sistema operativo: Windows 11 Version:26H2 Build:26300 System Type:64-bit
+Memoria instalada: 15.71 GB
+
+Información del programa
+Versión de Parasolid: 38.0.150
+Versión de PSBodyShop: 38.0.111
+Versión del adaptador Step: 1700.0.0
+Versión de Solid Edge: 226.00.01.004 x64
+
+Opciones de importación de STEP
+Importar cuerpos facetados: Activado
+Importar cuerpos revisados: Desactivado
+Importar curvas: Activado
+Importar sin guardar: Activado
+Importar varios cuerpos como archivo de una pieza: Activado
+Optimización de la importación: Desactivado
+Importar superficies unidas: Activado
+Importar sólidos booleanos: Activado
+Crear operación base: Activado
+Simplificar geometría: Activado
+Importar curvas para sobreimpresión: Activado
+Importar unidad de disco: C:
+Importar superficies unidas: Activado
+Importar superficies: Activado
+Importar vía de acceso de salida: C:\Users\lucia\OneDrive\Documentos\Facultad\5to\SegundoSemestre\RV\Trabajo_Integrador_RV\hardware\3d_models\step
+Importar con vía de acceso de salida predeterminada habilitada: Activado
+Importar PMI: Desactivado.
+Importar como componentes internos: Desactivado
+Importar vía de acceso: 
+
+Convirtiendo a tipos de datos Parasolid...
+Proceso de conversión completado
+Tiempo total requerido para convertir y posprocesar:00 : 00 : 02
