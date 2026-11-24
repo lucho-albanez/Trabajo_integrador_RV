@@ -52,7 +52,6 @@ var hardware_connected: bool = false
 var packet_rate_hz: float = 0.0
 var packets_received: int = 0
 var has_position_tracking: bool = false
-var dlpf_mode: int = 3
 
 # --- Entrada simulada ---
 ## Cuando es true, el teclado y el mouse manejan la herramienta simulada.
@@ -258,19 +257,6 @@ func send_command(cmd: Dictionary) -> void:
 	_udp_out.put_packet((JSON.stringify(cmd) + "\n").to_utf8_buffer())
 
 
-func send_raw(text: String) -> void:
-	var target := _last_sender if _last_sender != "" else COMMAND_HOST
-	var err := _udp_out.set_dest_address(target, COMMAND_PORT)
-	if err != OK:
-		return
-	_udp_out.put_packet((text + "\n").to_utf8_buffer())
-
-
-func set_dlpf(mode: int) -> void:
-	dlpf_mode = clampi(mode, 0, 6)
-	send_raw(str(dlpf_mode))
-
-
 ## Fija la intensidad (0-255) de un motor. Limita la tasa de envío y evita repeticiones.
 func send_haptic(motor: int, duty: int) -> void:
 	if motor < 0 or motor >= mini(haptic_motor_count, 2):
@@ -368,8 +354,6 @@ func _handle_line(line: String) -> void:
 			_hw_gap_msec = Time.get_ticks_msec()
 	if d.has("b"):
 		_hw_trigger = int(d["b"]) != 0
-	if d.has("dlpf"):
-		dlpf_mode = int(d["dlpf"])
 	if d.has("dx") and d.has("dy"):
 		has_position_tracking = true
 		_hw_travel += Vector2(float(d["dx"]), float(d["dy"]))
@@ -418,8 +402,8 @@ func _update_tare(delta: float) -> void:
 func _update_sim_keys(delta: float) -> void:
 	if not sim_capture:
 		return
-	var work_axis := Input.get_axis("left", "right")
-	var travel_axis := Input.get_axis("back", "forward")
+	var work_axis := Input.get_axis("tool_tilt_left", "tool_tilt_right")
+	var travel_axis := Input.get_axis("tool_tilt_back", "tool_tilt_forward")
 	_sim_work_deg = clampf(_sim_work_deg + work_axis * SIM_ANGLE_RATE_DEG_S * delta, -60.0, 60.0)
 	_sim_travel_deg = clampf(_sim_travel_deg + travel_axis * SIM_ANGLE_RATE_DEG_S * delta, -45.0, 70.0)
 

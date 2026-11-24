@@ -12,10 +12,10 @@ const ELECTRODE_LENGTH_MM := 350.0
 const ELECTRODE_STUB_MM := 50.0     # colilla que no se puede consumir
 const PLATE_THICKNESS_MM := 10.0
 
-const STICK_GAP_MM := 0.3           # por debajo: cortocircuito / electrodo pegado (tolerante)
-const OPTIMAL_GAP_MIN_MM := 1.0     # rango óptimo ampliado (1.0 mm a 6.0 mm)
-const OPTIMAL_GAP_MAX_MM := 6.0
-const EXTINGUISH_GAP_MM := 12.0     # solo se apaga si supera los 12.0 mm
+const STICK_GAP_MM := 0.8           # por debajo: cortocircuito / electrodo pegado
+const OPTIMAL_GAP_MIN_MM := 1.5
+const OPTIMAL_GAP_MAX_MM := 3.5
+const EXTINGUISH_GAP_MM := 6.0      # por encima: el arco se apaga
 
 const MIN_SPEED_MM_S := 0.3         # evita divisiones por cero
 

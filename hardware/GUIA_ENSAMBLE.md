@@ -1,6 +1,6 @@
 # Guía de ensamblado — Portaelectrodo SMAW sensorizado v3.1 (ArcSim_VR)
 
-Herramienta de 220 mm con ESP32, MPU6050, ToF VL53L0X, motor vibrador Ø27 mm, LED RGB KY-016 y pulsador de cebado. Todos los cables van **soldados** dentro de la carcasa.
+Herramienta de 250 mm con ESP32, MPU6050, ToF VL53L0X, motor vibrador Ø27 mm, LED RGB KY-016 y pulsador de cebado. Todos los cables van **soldados** dentro de la carcasa.
 
 > Antes de empezar leé `CAMBIOS_v3.md` (sección 9: datos pendientes). Si tu ESP32, tu placa ToF o tu ficha USB difieren de lo supuesto, probá primero que entren **en seco** (paso 0).
 
@@ -18,18 +18,17 @@ Herramienta de 220 mm con ESP32, MPU6050, ToF VL53L0X, motor vibrador Ø27 mm, L
 ### Tornillería (todo M3)
 | Cant. | Medida | Uso |
 |---|---|---|
-| 2 | M3 × 35 + 2 tuercas | cierre en el prensacable |
-| 2 | M3 × 25 + 2 tuercas | cierre en la zona del ESP32 |
-| 1 | M3 × 25 + 1 tuerca | cierre en la zona del motor |
+| 7 | M3 × 25 + 7 tuercas | extremo trasero (Z −102, 2), costados de la bahía ESP32 (Z −60 y −34, 4) y detrás del collarín (1) |
+| 2 | M3 × 30 + 2 tuercas | junto a la bahía USB (Z −80) |
 | 2 | M3 × 35 + 2 tuercas | cierre en el guarda-mano (Z 58,5 y Z 66) |
 | 1 | M3 × 18–20 + 1 tuerca | perno guía de la colisa |
 | 1 | M3 × 10–12 | regulación del pulsador (en la cabeza de la varilla) |
 | 2 | M3 × 10 | fijación del pod ToF |
-| 2 | M3 × 16–20 + 2 tuercas | fijación del MPU6050 |
+| 2 | tuercas M3 (opcional) | fijación del MPU6050 sobre los 2 machos (sin tornillos) |
 | 2 | M3 × 10–12 + 2 tuercas | soporte ArUco (opcional) |
 
 ### Electrónica
-- ESP32 DevKit (51,6 × 28,5 mm, USB-C), MPU6050 (GY-521), VL53L0X (módulo GY-530 o similar), LED RGB **KY-016**, pulsador táctil 6 × 6 mm.
+- ESP32 DevKit (51,6 × 28,5 mm, USB-C), MPU6050 (GY-521), VL53L0X (módulo GY-530 o similar), LED RGB **KY-016**, pulsador táctil que entre en un hueco de 12 × 12 × 4 mm (el hueco ya no es de 6 × 6 mm).
 - Motor vibrador DC Ø27 mm (el tuyo).
 - Circuito del motor: 1 MOSFET canal N de nivel lógico (AO3400 / IRLZ44N), 1 resistencia 220 Ω, 1 resistencia 100 kΩ, 1 diodo (1N4007 / 1N4148 / SS14), 1 capacitor cerámico 100 nF, 1 electrolítico 100–220 µF / 16 V.
 - Cable USB-C (de 2 a 3 m), mejor con ficha chica y funda corta.
@@ -43,7 +42,7 @@ Soldador, pelacables, tester, llave Allen de 2,5 mm, pinza, lima o lija fina, pi
 
 - Material: PLA+ o PETG (negro mate para la varilla, así no refleja el infrarrojo del sensor).
 - Carcasas: capa 0,20 mm, 3 perímetros, 20–25 % de relleno. Cada mitad se apoya sobre su **cara plana** (la del corte).
-- Cada mitad mide **220 × 66 mm** en planta, sobre una cama de 220 × 220: rotala **45° en Z** (huella ≈ 179 × 182 mm). Poné un borde chico (brim) si hace falta.
+- Cada mitad mide **250 × 66 mm** en planta, sobre una cama de 220 × 220: **no entra derecha**, rotala **45° en Z** (huella ≈ 202 × 202 mm, unos 9 mm de margen por lado). Poné un borde chico (brim) si hace falta.
 - Pod: 0,16 mm, 4 perímetros.
 - Varilla: acostada, 4 perímetros, 50–100 % de relleno, capa 0,16 mm.
 - Después de imprimir, pasá lija fina por la espiga Ø8 mm de la varilla hasta que caiga libre por gravedad dentro del casquillo.
@@ -57,9 +56,9 @@ Antes de cablear, apoyá cada componente en su lugar:
 2. **ESP32:** entra en la bahía de la **mitad derecha** (56 × 29,6 mm; la placa mide 51,6 × 28,5 y 14 mm con pines).
 3. **Ficha USB-C:** apoyala detrás del ESP32 en su bahía (17 × 13 × 26 mm).
 4. **GY-530:** en la cavidad del pod (21 × 14,5 mm), con el sensor sobre la ventana.
-5. **MPU6050:** contra la pared plana del cabezal (derecha), en los dos agujeros.
-6. **LED KY-016:** apoyá la placa en la cavidad del guarda-mano (20,4 × 16,4 mm): el LED tiene que asomar por el agujero de Ø6,4 mm y los dos agujeros M2 de la placa deben coincidir con los pines de los postes (a 11 mm).
-7. **Cables:** pasá un haz de prueba de 10 cables por el canal superior (8 × 4 mm).
+5. **MPU6050:** contra la pared plana del cabezal (derecha): los dos agujeros de la placa (16 mm entre centros) entran en los 2 machos de Ø2,9 mm. Fijá la placa fundiendo la punta de los machos, con una gota de cianoacrilato o con una tuerca M3 (los machos no tienen rosca, la tuerca solo se aprieta a presión).
+6. **LED KY-016:** apoyá la placa en la cavidad del guarda-mano (20,4 × 16,4 mm): el LED tiene que asomar por el agujero de Ø6,4 mm y la placa apoya en los rebordes de los extremos de la cavidad.
+7. **Cables:** pasá un haz de prueba de 10 cables por el canal superior (18 × 5,3 mm).
 
 Si algo no entra, avisame con las medidas reales antes de soldar.
 
@@ -125,18 +124,18 @@ Conexiones (MOSFET de nivel lógico, conmutando el lado de masa del motor):
 1. Apoyá el ESP32 en su bahía con la antena hacia **adelante**, el conector USB-C hacia **atrás** y el módulo (la cara con las letras) hacia la pared exterior derecha. Los pines quedan mirando al plano de corte.
 2. Soldá los 10 cables del cuadro de la sección 4 directo en los pines o en las pastillas.
 3. Enchufá la ficha USB-C en el conector y apoyala en su bahía. Pasá el cable por el orificio de la cola (Ø5,4 mm) y fijalo con un **precinto plástico dentro de la muesca** de la cola para que no se tire del conector.
-4. Fijá el ESP32 con dos gotas de termofusible o con un trocito de cinta doble faz: **la ranura de la placa no lo sujeta** (ver `CAMBIOS_v3.md`, sección 9).
+4. Fijá el ESP32 **boca abajo** en los **4 machos** de la mitad izquierda: la cara de componentes apoya sobre el piso y los headers miran hacia arriba (hacia el plano de corte). Pasá los agujeros de la placa por los machos y fundí la punta de cada uno con el soldador (o una gota de cianoacrilato). Antes probá que los agujeros de tu placa (Ø3 aprox.) dejen pasar los machos de Ø2,8 mm.
 
 ### Paso 5 — Cables al cabezal (mitad derecha)
-1. Llevá el haz de 10 cables desde la parte delantera del ESP32 hacia arriba por la rampa y a lo largo del canal superior (Z 0 a 46).
+1. Llevá el haz de 10 cables desde la parte delantera del ESP32 hacia arriba por la rampa y a lo largo del canal superior (Z −20 a 46).
 2. Al final del canal bajan al ducto delantero (Z 40,5 a 78). Ahí queda el circuito del motor (sección 4). Los 3 cables del LED (GPIO 26, GPIO 27 y GND) suben por el conducto del guarda-mano (Z 59 a 66) hasta la cavidad del LED.
 3. Los cables que siguen al cabezal (3V3, GND, SDA, SCL, GPIO 4) pasan al fondo del ducto y salen a la cámara del cabezal.
 4. En la cámara hacé los empalmes (3V3, GND, SDA y SCL se reparten entre el MPU6050, el pod ToF y el pulsador) y aislá cada uno.
 
 ### Paso 5b — LED KY-016 (mitad derecha)
 1. Soldá 3 cables (R, G y −) directo a los pines de la placa y sacale el resto del header. Dejá ~6 cm de cable.
-2. Pasá los cables por el conducto, apoyá la placa sobre los dos postes con los agujeros M2 en los pines de Ø1,9 mm y el LED hacia arriba, saliendo por el agujero de Ø6,4 mm. Si queda floja, una gota de cianoacrilato en los pines.
-3. Se cierra junto con la carcasa (paso 7): no lleva tornillos.
+2. Pasá los cables por el conducto y deslizá la placa desde el plano de corte hacia la cavidad, con el LED hacia arriba, hasta que el LED quede en el semiagujero de Ø6,4 mm. La placa apoya en el reborde de los dos extremos de la cavidad (no hay postes ni pines).
+3. Se cierra junto con la carcasa (paso 7): al cerrar queda atrapada entre los dos rebordes y el techo. Si querés, una gota de cianoacrilato en los rebordes.
 
 ### Paso 6 — Motor (mitad izquierda)
 1. Soldá 2 cables de 10 cm a los terminales del motor y aislá.
@@ -145,11 +144,12 @@ Conexiones (MOSFET de nivel lógico, conmutando el lado de masa del motor):
 4. Verificá que el desbalance gire libre sin tocar nada.
 
 ### Paso 7 — Cierre
-1. Metele las 7 tuercas M3 a la mitad derecha desde afuera (los hexágonos están abiertos al exterior); ayudate con pinzas de punta.
+1. Metele las 11 tuercas M3 a la mitad derecha desde afuera (los hexágonos están abiertos al exterior); ayudate con pinzas de punta.
 2. Acomodá los cables dentro de los canales y cerrá la mitad izquierda sobre la derecha, como un libro. Los pines guía tienen que encajar sin forzar.
 3. Pasá los tornillos desde la izquierda (cabeza Allen) y apretá de a poco y en cruz, sin pasarte (el plástico se raja):
-   - M3 × 35 en la cola (2) y en el guarda-mano (2),
-   - M3 × 25 en la zona del ESP32 (2) y en la zona del motor (1).
+   - M3 × 35 en el guarda-mano (2),
+   - M3 × 30 junto a la bahía USB (2),
+   - M3 × 25 en el extremo trasero (2), a los costados de la bahía ESP32 (4) y detrás del collarín (1).
 
 ### Paso 8 — Varilla del electrodo (auto-homing)
 1. Enroscá un tornillo M3 × 10–12 en la cabeza superior de la varilla.
@@ -189,15 +189,15 @@ Conexiones (MOSFET de nivel lógico, conmutando el lado de masa del motor):
 
 | Elemento | Valor |
 |---|---|
-| Largo total | 220 mm (Z −78 a +142) |
-| Diámetro del mango | Ø46 mm |
-| Bahía ESP32 | 56 × 29,6 mm (X ±9); placa 51,6 × 28,5 × 14 mm |
-| Bahía ficha USB-C | 17 × 13 × 26 mm |
+| Largo total | 250 mm (Z −108 a +142) |
+| Diámetro del mango | Ø54 mm |
+| Bahía ESP32 | 56 × 32 mm (Z −68 a −12; X −13 a +9; piso 2 mm más bajo en la mitad izquierda, v3.2); placa 51,6 × 28,5 × 14 mm |
+| Bahía ficha USB-C | 17 × 13 × 26 mm (Z −92 a −66) |
 | Orificio del cable USB | Ø5,4 mm |
-| Motor | pozo Ø27,75 × 13 (cuerpo, izquierda) + Ø29 × 11,3 (desbalance, derecha); centro Z = 25, Y = −1 |
-| Canal de cables | 8 × 4 mm, Z 0 a 46 |
+| Motor | pozo Ø27,75 × 13 (cuerpo, izquierda) + Ø29 × 11,3 (desbalance, derecha); centro Z = 5, Y = −1 |
+| Canal de cables | superior 17,9 × 5,3 mm (X −13 a +6,9, a la altura del piso de la ESP32) e inferior espejo 15,9 × 3,8 mm (X −9 a +6,9), Z −20 a 46; aristas redondeadas (v3.2) |
 | LED KY-016 | eje en Z = 65,5; salida Ø6,4 en la cara superior del guarda-mano (Y = 35); el domo asoma 3 mm |
 | Ducto delantero | 14 × 20 × 37,5 mm |
-| Cavidad ToF | 21 × 14,5 mm, ventana 12 × 9 mm |
+| Cavidad ToF | 21 × 14,5 mm, ventana 14 × 14,5 mm |
 | Lente ToF → punta (varilla 60 mm) | 57,2 mm |
 | Recorrido de la varilla | 2,5 mm |

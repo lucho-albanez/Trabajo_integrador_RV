@@ -126,25 +126,26 @@ func show_message(text: String, seconds: float = 3.0) -> void:
 
 
 ## items: Array de {text: String, done: bool}.
-func set_checklist(items: Array) -> void:
+func set_checklist(items: Array, heading: String = "Preparación del equipo") -> void:
 	for child in _checklist_box.get_children():
 		_checklist_box.remove_child(child)
 		child.queue_free()
 	var title := Label.new()
-	title.text = "Preparación del equipo"
+	title.text = heading
 	title.add_theme_font_size_override("font_size", 16)
 	_checklist_box.add_child(title)
 	for item in items:
 		var d: Dictionary = item
 		var lbl := Label.new()
 		var done: bool = d["done"]
-		lbl.text = ("[x] " if done else "[  ] ") + String(d["text"])
-		lbl.add_theme_color_override("font_color", COLOR_OK if done else COLOR_PENDING)
+		var current: bool = d.get("current", false)
+		lbl.text = ("[x] " if done else ("[>] " if current else "[  ] ")) + String(d["text"])
+		lbl.add_theme_color_override("font_color", COLOR_OK if done else (COLOR_WARN if current else COLOR_PENDING))
 		_checklist_box.add_child(lbl)
 
 
 func set_checklist_visible(value: bool) -> void:
-	_checklist_panel.visible = value and level != null and level.show_checklist
+	_checklist_panel.visible = value  # la secuencia de pasos se muestra en todos los niveles
 
 
 func set_gauges_visible(value: bool) -> void:

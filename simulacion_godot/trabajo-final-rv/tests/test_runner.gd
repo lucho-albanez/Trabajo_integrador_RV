@@ -34,6 +34,7 @@ func _run() -> void:
 	await _test_device_link()
 
 	print("== Ejercicio completo (simulado) ==")
+	await _test_setup_sequence()
 	await _test_exercise_flow()
 
 	print("== Resultado: %d verificaciones, %d fallos ==" % [_checks, _failures])
@@ -319,6 +320,82 @@ func _run_scenario(level: int, speed: float, gap: float, work: float, travel: fl
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	return report
+
+
+func _wait_sequence_idle(seq: SetupSequence, max_frames: int = 900) -> void:
+	var guard := 0
+	while seq.busy and guard < max_frames:
+		guard += 1
+		await get_tree().physics_frame
+
+
+func _test_setup_sequence() -> void:
+	print("-- Preparación guiada (secuencia 1-5) --")
+	var scene := await _spawn_exercise(1)
+	var ctrl := scene.get_node("ExerciseController") as ExerciseController
+	var seq := ctrl.sequence
+	var player := scene.get_node("Player") as Player
+	var machine := scene.get_node("WeldingMachine") as WeldingMachine
+	var clamp := scene.get_node("GroundClamp") as GroundClamp
+	var holder := scene.get_node("ElectrodeHolder") as ElectrodeHolder
+	var start_pos := player.global_position
+
+	# El jugador ya no se mueve con el teclado: no hay acciones de movimiento.
+	for a in ["left", "right", "forward", "back", "jump", "crouch", "start_exercise"]:
+		_check(not InputMap.has_action(a), "no existe la acción de movimiento libre '%s'" % a)
+	for i in range(1, 6):
+		_check(InputMap.has_action("step_%d" % i), "existe la acción step_%d" % i)
+
+	# Saltear pasos está prohibido.
+	for bad in [2, 3, 4, 5]:
+		seq.request(bad)
+		_check(seq.next_step == 1 and not seq.busy, "no se puede ejecutar el paso %d antes del 1" % bad)
+	_check(not clamp.is_clamped and not holder.is_held and not machine.is_on, "ningún paso se ejecutó")
+	_check(player.global_position.is_equal_approx(start_pos), "el jugador no se movió")
+
+	# Paso 1.
+	seq.request(1)
+	_check(seq.busy, "el paso 1 deja la secuencia ocupada")
+	seq.request(2)
+	_check(seq.next_step == 1, "mientras hay una tarea en curso se ignoran otros pasos")
+	await _wait_sequence_idle(seq)
+	_check(clamp.is_clamped and seq.next_step == 2, "paso 1: pinza de masa conectada")
+	seq.request(1)
+	_check(seq.next_step == 2, "repetir el paso 1 no retrocede ni repite")
+	seq.request(3)
+	_check(seq.next_step == 2 and not machine.is_on, "no se salta del 2 al 3")
+
+	# Paso 2 y 3.
+	seq.request(2)
+	await _wait_sequence_idle(seq)
+	_check(holder.is_held and seq.next_step == 3, "paso 2: portaelectrodo en mano")
+	seq.request(3)
+	await _wait_sequence_idle(seq)
+	_check(machine.is_on and seq.next_step == 4, "paso 3: máquina encendida")
+
+	# Paso 4: la rueda solo funciona después de mirar la máquina.
+	var amps0 := machine.current_amperage
+	_check(not seq.adjust_amperage(1) and machine.current_amperage == amps0, "la rueda no regula antes del paso 4")
+	seq.request(4)
+	await _wait_sequence_idle(seq)
+	_check(seq.amperage_mode and seq.next_step == 5, "paso 4: mirando la máquina, modo amperaje")
+	_check(seq.adjust_amperage(1) and machine.current_amperage == amps0 + machine.amperage_step, "la rueda sube el amperaje")
+	# Con amperaje fuera de rango, el paso 5 se bloquea (nivel con ayudas).
+	machine.current_amperage = 60
+	seq.request(5)
+	_check(ctrl.state == ExerciseController.State.SETUP and not seq.busy, "amperaje fuera de rango: el paso 5 se bloquea")
+	machine.current_amperage = 110
+	seq.request(5)
+	_check(seq.busy, "con amperaje correcto el paso 5 arranca")
+	var guard := 0
+	while ctrl.state != ExerciseController.State.WELDING and guard < 900:
+		guard += 1
+		await get_tree().physics_frame
+	_check(ctrl.state == ExerciseController.State.WELDING, "tras el paso 5 se calibra y se pasa a soldar")
+	_check(player.mode == Player.Mode.STATION, "el operario queda posicionado en la mesa de trabajo")
+	scene.queue_free()
+	await get_tree().physics_frame
+	await get_tree().physics_frame
 
 
 func _test_exercise_flow() -> void:

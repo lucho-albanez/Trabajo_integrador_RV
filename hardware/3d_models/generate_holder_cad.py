@@ -41,29 +41,29 @@ WALL = 3.0              # Espesor minimo de pared de la carcasa
 
 # ---- Longitud total ---------------------------------------------------------
 FRONT_Z = 142.0                     # Frente del cabezal (no cambia)
-TOTAL_LEN = 220.0                   # Largo total objetivo (Ender 3 V2: 220 x 220)
+TOTAL_LEN = 250.0                   # v3.9: 250 mm (antes 220). Cada mitad se imprime en diagonal en la Ender 3 V2 (cama 220 x 220): ocupa ~202 x 202 mm
 GLAND_LEN = 20.0                    # Cono trasero del prensacable
-GLAND_Z0 = FRONT_Z - TOTAL_LEN      # -78.0
+GLAND_Z0 = FRONT_Z - TOTAL_LEN      # -108.0
 GLAND_END_OD = 22.0
 USB_CABLE_DIA = 5.4
 
 # ---- Mango ergonomico -------------------------------------------------------
-HANDLE_Z0 = GLAND_Z0 + GLAND_LEN    # -58.0
+HANDLE_Z0 = GLAND_Z0 + GLAND_LEN    # -88.0
 HANDLE_Z1 = 50.0
-HANDLE_OD = 46.0
+HANDLE_OD = 54.0                    # v3.10: 54 mm (antes 46) para tener mucho espacio de cables
 HANDLE_R = HANDLE_OD / 2.0
 # Estrias de agarre (Z de inicio de cada una, 4.5 mm de ancho). Elegidas para no
 # pisar tornillos ni pines (verificado en verify_clearances()).
-GRIP_GROOVES_Z = [-51.0, -38.0, -25.0, -12.0, 1.0, 14.0, 41.0]
+GRIP_GROOVES_Z = [-74.25, -56.25, -43.25, -27.25, -7.25, 17.75, 39.75]   # v3.10: centros en -72,-54,-41,-25,-5,20,42 (lejos de tornillos y pines)
 
 # ---- Collarin aislante y guarda-mano ----------------------------------------
 COLLAR_Z0 = 48.0
 COLLAR_Z1 = 55.0
-COLLAR_OD = 50.0
+COLLAR_OD = 56.0                    # v3.10: 2 mm mas que el mango
 
 GUARD_Z0 = 55.0             # v3.1: guarda-mano de 17 mm (antes 12) para alojar el LED
 GUARD_Z1 = 72.0
-GUARD_W = 54.0
+GUARD_W = 56.0                     # v3.10: acompana al collarin mas grande
 GUARD_H = 66.0
 
 # ---- Cabezal / Mordaza (Z = 72 a 142) - SIN CAMBIOS --------------------------
@@ -76,16 +76,26 @@ HEAD_H = HEAD_Y_TOP - HEAD_Y_BOT
 HEAD_YC = 0.5 * (HEAD_Y_BOT + HEAD_Y_TOP)
 
 # ---- Ficha USB + ESP32 (de atras hacia adelante) ----------------------------
-USB_BAY_Z0 = -72.0                  # Inicio bahia ficha USB (pared >= 4.6 mm en el cono)
+USB_BAY_Z0 = -92.0                  # Inicio bahia ficha USB (pared >= 4.6 mm en el cono)
 USB_BAY_HX = 8.5                    # Semi-ancho en X (17 mm)
 USB_BAY_HY = 6.5                    # Semi-alto en Y (13 mm)
 
-ESP_Z0 = -48.0
-ESP_Z1 = 8.0                        # Bahia 56 mm de largo
-ESP_W_Y = 29.6
+ESP_Z0 = -68.0                      # v3.10: ESP32 y motor 20 mm mas atras (antes -48)
+ESP_Z1 = -12.0                       # Bahia 56 mm de largo
+ESP_W_Y = 32.0                      # v3.10: bahia mas ancha (antes 29.6) para cables a los lados
 ESP_BOARD_L = 51.6                  # Medido por el usuario (v3.1)
 ESP_BOARD_W = 28.5
 ESP_PINS_H = 9.0                    # Pines bajo la placa (14 mm totales - 5 mm de placa+componentes)
+ESP_RAISE = -4.0                    # v3.14: plataforma (piso) de la ESP32 en la mitad izquierda 2 mm mas baja que v3.13 (X = -13)
+# ---- v3.3: machos de sujecion de la ESP32 (cuatro postes con pin en la mitad izquierda) --------
+ESP_HOLE_DZ = 47.0                  # Entre centros, lado largo (medido por el usuario)
+ESP_HOLE_DY = 23.0                  # Entre centros, lado corto (medido por el usuario)
+ESP_PCB_T = 1.6                     # Espesor de la placa
+ESP_COMP_H = 3.4                    # v3.4: componentes bajo la placa; la placa va BOCA ABAJO apoyada en el piso
+ESP_PIN_R = 1.4                     # Macho Ø2.8 (agujero M3: Ø3.0-3.2)
+ESP_PIN_PROTRUDE = 1.0              # El macho asoma sobre la cara superior de la placa (para fundirlo / remachar)
+ESP_HEADER_HALF_Z = 20.0            # Mitad del largo de los headers (supuesto: placa de 30 pines, 15 por lado)
+ESP_HEADER_Y = 12.7                 # Los headers estan a +-12.7 mm del eje (25.4 entre filas)
 ESP_TOP_H = 5.0                     # Placa + microcontrolador sobre la cara inferior de la placa
 USBC_HX = 4.0                       # Receptaculo USB-C: 8 mm de ancho (Y) x 3 mm de alto (X)
 
@@ -94,7 +104,7 @@ MOTOR_DIA = 27.0                    # Diametro del cuerpo
 MOTOR_BODY_H = 12.45                # Altura sin eje
 MOTOR_TOTAL_H = 23.0                # Altura con eje + desbalance
 MOTOR_GAP = 3.0                     # Cuerpo -> desbalance
-MOTOR_Z = 25.0                      # Centro del motor en Z
+MOTOR_Z = 5.0                      # Centro del motor en Z
 MOTOR_Y = -1.0                      # Centro del motor en Y
 MOTOR_BODY_CLEAR = 0.375            # Holgura radial zona cuerpo (Ø27.75)
 MOTOR_WEIGHT_CLEAR = 1.0            # Holgura radial zona desbalance (Ø29.0)
@@ -104,9 +114,13 @@ MOTOR_RELIEF_DIA = 20.0             # Alivio trasero para soldaduras/cables
 MOTOR_RELIEF_DEPTH = 4.0
 
 # ---- Canal de cables superior + ducto delantero -----------------------------
-CH_HX = 4.0                         # Canal: 8 mm de ancho (v3.1: 10 cables en 2 filas)
-CH_Y0, CH_Y1 = 15.6, 19.6           # Canal: 4 mm de alto (sobre el motor)
-CH_Z0, CH_Z1 = 0.0, 46.0
+CH_X0 = -9.0 + ESP_RAISE            # v3.2: canal a la altura del piso de la ESP32 en la mitad izquierda (X = -11)
+CH_X1 = 6.9                         # y 6.9 mm de profundidad en la mitad derecha
+WIRE_FILLET_R = 2.0                 # v3.2: radio maximo de redondeo de las aristas por donde doblan los cables
+CH_Y0, CH_Y1 = 14.7, 20.0           # Canal superior: 2.9 mm de alto (sobre el motor); Y1 = 17.6 deja >= 1 mm de pared (con estrias) a X = -11
+CHB_Y0, CHB_Y1 = -20.4, -16.6       # v3.2: canal inferior espejo, 2.0 mm de alto (bajo el motor)
+CHB_X0 = -9.0                       # el inferior solo llega a X = -9 (el borde exterior no admite mas)
+CH_Z0, CH_Z1 = -20.0, 46.0
 DUCT_Z0 = 40.5                      # Ducto delantero (aloja circuito MOSFET)
 DUCT_HX = 7.0
 DUCT_Y0, DUCT_Y1 = -9.0, 11.0
@@ -129,13 +143,22 @@ LED_BOARD_BOT_Y = LED_BOARD_TOP_Y - 1.6                                    # 22.
 LED_CAV_CLEAR = 1.4
 LED_CAV_Y0 = LED_BOARD_BOT_Y - 3.0  # 3 mm bajo la placa: soldaduras y cables
 LED_CAV_Y1 = LED_BOARD_TOP_Y + 0.9  # 0.9 mm sobre la placa (resistencias SMD); la placa queda atrapada
-LED_POST_R = 2.5
+LED_CAV_HX = (LED_BOARD_X + LED_CAV_CLEAR) / 2.0   # 10.2
+LED_LEDGE_X0 = 8.0                  # El reborde de apoyo va de |X| = 8.0 a 10.2 (la placa llega a 9.5)
+LED_OPEN_X = 8.0                    # Zona despejada bajo la placa: |X| < 8
+LED_OPEN_Y0 = 10.0
+LED_OPEN_Z0, LED_OPEN_Z1 = 58.0, 73.7
 LED_PIN_R = 0.95                    # Pin Ø1.9 que entra en el agujero M2 (Ø2.2-2.4) de la placa
 LED_HOLE_Z_OFF = LED_BOARD_Z / 2.0 - LED_HOLES_EDGE   # Agujeros sobre el borde +Z de la placa
 
 # ---- Montaje MPU6050 (GY-521) - SIN CAMBIOS ----------------------------------
-MPU_HOLES_Z = (80.0, 95.6)
-MPU_HOLE_Y = 12.5
+# v3.7: en lugar de 2 agujeros con tuerca, 2 MACHOS M3 en la pared X = +8 (mitad derecha), a 16 mm entre centros,
+# alineados en Y (el de abajo se paso a la derecha del de arriba: -Y), ambos a Z = 95.6.
+MPU_STUD_Z = 95.6
+MPU_STUD_Y = (12.5, -3.5)           # 16 mm entre centros
+MPU_STUD_R = 1.45                   # Macho Ø2.9 (agujero M3 de la placa)
+MPU_STUD_TIP_X = 4.0                # Punta del macho (la placa ocupa X 6.4 a 8.0: asoma 2.4 mm sobre la placa)
+MPU_BOARD_Z_LEN = 20.3              # Largo de la placa en Z; los agujeros estan a 3.5 mm del extremo +Z
 
 # =============================================================================
 # MECANISMO DE VARILLA DESLIZANTE + AUTO-HOMING (sin cambios)
@@ -150,8 +173,8 @@ ELEC_COLLAR_H = 3.0
 
 SW_BODY_Y0 = 10.0
 SW_BODY_Y1 = 14.0
-SW_POCKET_W_X = 6.4
-SW_POCKET_L_Z = 6.4
+SW_POCKET_W_X = 12.0                 # v3.6: hueco del pulsador 12 x 12 x 4 mm, centrado en el eje del electrodo
+SW_POCKET_L_Z = 12.0
 SW_WIRE_W_X = 4.0
 SW_STEM_HOLE_DIA = 5.6
 
@@ -169,8 +192,8 @@ TOF_PCB_MAX_Z = 13.5                # Ancho maximo de placa admitido
 TOF_CAV_CLEAR = 1.0                 # Holgura total (0.5 por lado)
 TOF_CAV_HX = (TOF_PCB_MAX_X + TOF_CAV_CLEAR) / 2.0     # 12.75
 TOF_CAV_HZ = (TOF_PCB_MAX_Z + TOF_CAV_CLEAR) / 2.0     # 7.25
-TOF_WIN_HX = 6.0                    # Ventana alargada: el CI puede estar corrido
-TOF_WIN_HZ = 4.5
+TOF_WIN_HX = 7.0                    # v3.8: ventana de 14 mm en X (antes 12)
+TOF_WIN_HZ = TOF_CAV_HZ         # v3.8: ventana abierta en todo el largo de la cavidad en Z (se quitan las tiras de 2.75 mm)
 TOF_FLOOR_T = 2.2                   # Espesor del piso del pod (CI queda a ras)
 TOF_FOV_DEG = 25.0                  # Datasheet VL53L0X
 
@@ -181,12 +204,16 @@ ARUCO_SCREWS_Z = (77.0, 118.5)
 
 # ---- Tornillos M3 de cierre de las dos mitades (Z, Y) -----------------------
 CLAMSHELL_BOLTS = [
-    (-62.0, 12.0),      # Prensacable arriba
-    (-62.0, -12.0),     # Prensacable abajo
-    (-30.0, 18.5),      # Zona ESP32 arriba (fuera de la bahia)
-    (-30.0, -18.5),     # Zona ESP32 abajo
-    (25.0, -19.5),      # Zona motor (solo abajo: arriba pasa el canal de cables)
-    (58.5, 30.0),       # Guarda-mano arriba (v3.1: corrido para dejar lugar al LED)
+    (-102.0, 9.0),      # v3.10: extremo trasero (cono del prensacable)
+    (-102.0, -9.0),
+    (-80.0, 12.0),      # junto a la bahia USB
+    (-80.0, -12.0),
+    (-60.0, 20.0),      # a los lados de la bahia ESP32 (bahia ancha 32 mm)
+    (-60.0, -20.0),
+    (-34.0, 20.0),
+    (-34.0, -20.0),
+    (49.5, -19.5),      # detras del collarin (la zona motor/canales no admite tornillos)
+    (58.5, 30.0),       # Guarda-mano arriba (corrido para dejar lugar al LED)
     (66.0, -21.0),      # Guarda-mano abajo
 ]
 M3_CLEAR_R = 1.7
@@ -195,16 +222,22 @@ M3_NUT_AF = 5.75
 M3_NUT_R = M3_NUT_AF / math.sqrt(3.0)
 # Pozos mas profundos (mm extra) para los tornillos del guarda-mano: acortan el tornillo
 # necesario de ~50 mm a ~35 mm (cabeza y tuerca quedan embutidas 10 mm mas adentro).
-BOLT_WELL_EXTRA = {66.0: 10.0, 58.5: 10.0}
+BOLT_WELL_EXTRA = {66.0: 10.0, 58.5: 10.0, -80.0: 10.0, -60.0: 5.0, -34.0: 5.0, 49.5: 5.0}   # v3.10: pozos mas hondos acortan los tornillos
 M3_NUT_T = 2.4          # Espesor de tuerca M3
 M3_HEAD_T = 3.0         # Altura de cabeza Allen M3
 
 # Pines guia de alineacion entre mitades (en el plano X = 0, zonas macizas)
 ALIGN_PINS = [
-    (-56.0, 17.0),
-    (-56.0, -17.0),
-    (-16.0, 18.8),
-    (-16.0, -18.8),
+    (-84.0, 17.0),      # junto a la bahia USB
+    (-84.0, -17.0),
+    (-48.0, 21.5),      # zona ESP32 (fuera de la bahia y de la ranura de PCB)
+    (-48.0, -21.5),
+    (-16.0, 23.0),      # zona motor / canales: unico lugar macizo es la pared exterior
+    (-16.0, -23.0),
+    (6.0, 23.0),
+    (6.0, -23.0),
+    (34.0, 23.0),
+    (34.0, -23.0),
     (54.0, 17.0),
     (54.0, -17.0),
     (106.0, 24.5),
@@ -308,6 +341,43 @@ def build_outer_body() -> cq.Workplane:
 # =============================================================================
 # 2. CAVIDADES INTERNAS
 # =============================================================================
+def rounded_wire_path(parts: list[cq.Workplane]) -> cq.Workplane:
+    """Une los tramos de un canal de cables y redondea las aristas paralelas a X
+    (las que recorre el cable al doblar: rampa -> canal -> subida). Prueba radios
+    decrecientes hasta que OpenCASCADE acepte el redondeo."""
+    tool = parts[0]
+    for q in parts[1:]:
+        tool = tool.union(q)
+    tool = tool.clean()
+    r = WIRE_FILLET_R
+    while r >= 0.4:
+        try:
+            out = tool.edges("|X").fillet(r)
+            if out.val().isValid():
+                print(f"  [redondeo de canal de cables: radio {r:.1f} mm]")
+                return out
+        except Exception:
+            pass
+        r -= 0.25
+    print("  [AVISO] no se pudo redondear el canal de cables")
+    return tool
+
+
+def round_all_edges(tool: cq.Workplane, r_max: float, label: str) -> cq.Workplane:
+    r = r_max
+    while r >= 0.4:
+        try:
+            out = tool.edges("|Z").fillet(r).edges("|Y").fillet(r) if label.startswith("muesca") else tool.edges().fillet(r)
+            if out.val().isValid():
+                print(f"  [redondeo {label}: radio {r:.1f} mm]")
+                return out
+        except Exception:
+            pass
+        r -= 0.25
+    print(f"  [AVISO] no se pudo redondear {label}")
+    return tool
+
+
 def motor_cuts() -> list[tuple[str, cq.Workplane]]:
     """Bolsillo del motor: eje a lo largo de X, cuerpo en X<0 (mitad izquierda),
     desbalance en X>0 (mitad derecha)."""
@@ -319,26 +389,70 @@ def motor_cuts() -> list[tuple[str, cq.Workplane]]:
         ("motor_back_relief", cyl_x(MOTOR_Y, MOTOR_Z, MOTOR_RELIEF_DIA / 2.0,
                                     -MOTOR_BODY_DEPTH - MOTOR_RELIEF_DEPTH, -MOTOR_BODY_DEPTH + 0.1)),
         # Los cables del motor salen por detras del can y suben hacia el ducto delantero
-        ("motor_wire_notch", box_xyz(-MOTOR_BODY_DEPTH - 3.0, -5.0, MOTOR_Y - 3.0, MOTOR_Y + 3.0,
-                                     MOTOR_Z, DUCT_Z0 + 4.0)),
+        ("motor_wire_notch", box_xyz(-MOTOR_BODY_DEPTH - 3.0, -5.0, MOTOR_Y - 4.5, MOTOR_Y + 4.5, MOTOR_Z, DUCT_Z0 + 3.7)
+                                   .edges("|Z").fillet(1.5)),
     ]
+
+
+MOTOR_BOSS_WALL = 1.8               # v3.11: pared minima que rodea al bolsillo del motor
+MOTOR_CAV_Z0 = ESP_Z1 + 2.5         # pared de 2.5 mm contra la bahia ESP32
+MOTOR_CAV_Z1 = 44.0                 # se une con el ducto delantero (Z 40.5)
+MOTOR_CAV_RIN = HANDLE_R - 1.2 - 1.8   # deja 3 mm de pared (1.8 mm bajo las estrias)
+MOTOR_PLATFORM_TOP_X = -MOTOR_BODY_DEPTH - 3.0   # v3.12: tope de la plataforma = piso de la salida de cables del motor (X = -16)
+MOTOR_RIB_T = 3.0                   # costillas que unen el anillo del motor con la pared exterior
+
+
+def motor_zone_cavity() -> cq.Workplane:
+    """v3.11: el bloque macizo alrededor del motor se vacia. Solo quedan: el anillo del motor
+    (pared MOTOR_BOSS_WALL alrededor del bolsillo), 2 costillas finas que lo unen a la pared
+    exterior y un taco alrededor de cada pin guia. Lo demas es espacio libre para cables."""
+    cav = cyl_z(0.0, 0.0, MOTOR_CAV_RIN, MOTOR_CAV_Z0, MOTOR_CAV_Z1)
+    r_boss = MOTOR_DIA / 2.0 + MOTOR_WEIGHT_CLEAR + MOTOR_BOSS_WALL
+    x0 = -(MOTOR_BODY_DEPTH + MOTOR_RELIEF_DEPTH) - MOTOR_BOSS_WALL
+    x1 = MOTOR_WEIGHT_DEPTH + MOTOR_BOSS_WALL
+    keep = cyl_x(MOTOR_Y, MOTOR_Z, r_boss, x0, x1)
+    # Mitad derecha: costilla fina hasta la pared exterior
+    keep = keep.union(box_xyz(x1 - 0.5, 26.0, MOTOR_Y - MOTOR_RIB_T / 2.0, MOTOR_Y + MOTOR_RIB_T / 2.0,
+                              MOTOR_Z - r_boss, MOTOR_Z + r_boss))
+    # v3.12: mitad izquierda: plataforma maciza bajo el alojamiento, desde la pared exterior hasta el
+    # piso del orificio por donde salen los cables del motor (X = -MOTOR_BODY_DEPTH - 3 = -16)
+    # v3.13: la plataforma se prolonga hacia adelante (22.7 mm) hasta la pared frontal de la cavidad,
+    # y se repite espejada en la mitad derecha (piso a X = +16, ademas de la costilla que une el anillo)
+    z_front = MOTOR_CAV_Z1 + 1.0
+    keep = keep.union(box_xyz(-26.0, MOTOR_PLATFORM_TOP_X, MOTOR_Y - r_boss, MOTOR_Y + r_boss,
+                              MOTOR_Z - r_boss, z_front))
+    keep = keep.union(box_xyz(-MOTOR_PLATFORM_TOP_X, 26.0, MOTOR_Y - r_boss, MOTOR_Y + r_boss,
+                              MOTOR_Z - r_boss, z_front))
+    for pz, py in ALIGN_PINS:
+        if MOTOR_CAV_Z0 - 4.0 < pz < MOTOR_CAV_Z1 + 4.0 and abs(py) > 20.0:
+            keep = keep.union(cyl_x(py, pz, 3.4, -7.0, 7.0))
+    return cav.cut(keep)
 
 
 def build_internal_cutout_list() -> list[tuple[str, cq.Workplane]]:
     cuts: list[tuple[str, cq.Workplane]] = [
         # 2.1 Entrada cable USB + bahia ficha USB + muesca anti-tirones
         ("usb_channel", cyl_z(0.0, 0.0, USB_CABLE_DIA / 2.0, GLAND_Z0 - 2.0, USB_BAY_Z0 + 2.0)),
-        ("usb_tie_slot", box_xyz(-6.0, 6.0, -4.5, 4.5, GLAND_Z0 + 1.0, USB_BAY_Z0 + 1.0)),
-        ("usb_plug_bay", box_xyz(-USB_BAY_HX, USB_BAY_HX, -USB_BAY_HY, USB_BAY_HY, USB_BAY_Z0, ESP_Z0 + 2.0)),
+        ("usb_tie_slot", box_xyz(-6.0, 6.0, -4.5, 4.5, USB_BAY_Z0 - 5.0, USB_BAY_Z0 + 1.0)),   # v3.9: sigue pegado a la bahia USB
+        ("usb_plug_bay", box_xyz(-USB_BAY_HX + ESP_RAISE - 3.0, USB_BAY_HX + ESP_RAISE, -USB_BAY_HY, USB_BAY_HY, USB_BAY_Z0, ESP_Z0 + 2.0)),
 
         # 2.2 Bahia ESP32 DevKit v1 + ranuras PCB
-        ("esp32_bay", box_xyz(-9.0, 9.0, -ESP_W_Y / 2.0, ESP_W_Y / 2.0, ESP_Z0, ESP_Z1)),
-        ("esp32_pcb_slot", box_xyz(1.0, 3.2, -(ESP_W_Y / 2.0 + 1.2), (ESP_W_Y / 2.0 + 1.2), ESP_Z0 + 1.5, ESP_Z1 - 1.5)),
+        ("esp32_bay", box_xyz(-9.0 + ESP_RAISE, 9.0, -ESP_W_Y / 2.0, ESP_W_Y / 2.0, ESP_Z0, ESP_Z1)),
+        ("esp32_pcb_slot", box_xyz(1.0 + ESP_RAISE, 3.2 + ESP_RAISE, -(ESP_W_Y / 2.0 + 1.2), (ESP_W_Y / 2.0 + 1.2), ESP_Z0 + 1.5, ESP_Z1 - 1.5)),
 
-        # 2.3 Canal de cables superior (rodea al motor) + rampa + subida al ducto
-        ("wire_ramp", box_xyz(-CH_HX, CH_HX, 12.0, CH_Y1, CH_Z0, 9.0)),
-        ("wire_channel_top", box_xyz(-CH_HX, CH_HX, CH_Y0, CH_Y1, CH_Z0, CH_Z1)),
-        ("wire_riser", box_xyz(-CH_HX, CH_HX, 9.0, CH_Y1, DUCT_Z0, CH_Z1)),
+        # 2.2b v3.11: zona del motor vaciada (solo queda el anillo del motor + costillas)
+        ("motor_zone_cavity", motor_zone_cavity()),
+
+        # 2.3 Canales de cables (superior e inferior espejo, rodean al motor) + rampa + subida al ducto.
+        # v3.2: cada canal es una sola herramienta con las aristas |X redondeadas (los cables no se doblan en filo vivo)
+        ("wire_channel_top", rounded_wire_path(
+            [box_xyz(CH_X0, CH_X1, 12.0, CH_Y1, CH_Z0, CH_Z0 + 9.0),
+             box_xyz(CH_X0, CH_X1, CH_Y0, CH_Y1, CH_Z0, CH_Z1),
+             box_xyz(CH_X0, CH_X1, 9.0, CH_Y1, DUCT_Z0, CH_Z1)])),
+        ("wire_channel_bot", rounded_wire_path(
+            [box_xyz(CHB_X0, CH_X1, CHB_Y0, -12.0, CH_Z0, CH_Z0 + 9.0),
+             box_xyz(CHB_X0, CH_X1, CHB_Y0, CHB_Y1, CH_Z0, CH_Z1),
+             box_xyz(CHB_X0, CH_X1, CHB_Y0, -9.0, DUCT_Z0, CH_Z1)])),
 
         # 2.4 Ducto delantero: aloja el circuito MOSFET/flyback y los cables al cabezal
         ("wire_duct", box_xyz(-DUCT_HX, DUCT_HX, DUCT_Y0, DUCT_Y1, DUCT_Z0, HEAD_Z0 + 6.0)),
@@ -349,6 +463,8 @@ def build_internal_cutout_list() -> list[tuple[str, cq.Workplane]]:
                                LED_Z - (LED_BOARD_Z + LED_CAV_CLEAR) / 2.0, LED_Z + (LED_BOARD_Z + LED_CAV_CLEAR) / 2.0)),
         ("led_exit_hole", cyl_y(0.0, LED_Z, LED_HOLE_DIA / 2.0, LED_CAV_Y1 - 1.0, LED_TOP_Y + 2.0)),
         ("led_wire_riser", box_xyz(-4.0, 4.0, 9.0, LED_CAV_Y0 + 1.0, 59.0, 66.0)),
+        # v3.5: se elimina el material entre la subida de cables, la camara del cabezal y la cavidad del LED
+        ("led_clear", box_xyz(-LED_OPEN_X, LED_OPEN_X, LED_OPEN_Y0, LED_CAV_Y0 + 1.0, LED_OPEN_Z0, LED_OPEN_Z1)),
 
         # 2.5 Camara principal del cabezal (MPU6050 sobre pared X = +8)
         ("head_wire_bay", box_xyz(-8.0, 8.0, -10.0, 16.5, HEAD_Z0 - 2.0, 114.0)),
@@ -442,26 +558,34 @@ def build_clamshell_halves() -> tuple[cq.Workplane, cq.Workplane, cq.Workplane]:
     right_half = shell.intersect(right_mask)
     left_half = shell.intersect(left_mask)
 
-    for mz in MPU_HOLES_Z:
-        right_half = right_half.cut(cyl_x(MPU_HOLE_Y, mz, M3_CLEAR_R, 7.0, HEAD_W / 2.0 + 3.0))
-        right_half = right_half.cut(hex_x(MPU_HOLE_Y, mz, M3_NUT_R * 2.0, HEAD_W / 2.0 - 3.3, HEAD_W / 2.0 + 3.0))
+    # v3.7: machos M3 del MPU6050 (sin agujeros pasantes ni tuercas)
+    for my in MPU_STUD_Y:
+        right_half = right_half.union(cyl_x(my, MPU_STUD_Z, MPU_STUD_R, MPU_STUD_TIP_X, 8.5))
 
     for pz, py in ALIGN_PINS:
         right_half = right_half.union(cyl_x(py, pz, 1.45, -3.0, 1.5))
         left_half = left_half.cut(cyl_x(py, pz, 1.70, -3.6, 0.5))
 
-    # Postes + pines del LED: la placa apoya en los postes y sus 2 agujeros M2 (11 mm) encastran
-    # en 2 pines Ø1.9 (uno por mitad). Con la carcasa cerrada la placa queda atrapada: no se usan
-    # tornillos porque no hay acceso a ellos (la placa queda horizontal bajo el guarda-mano).
-    led_hole_z = LED_Z + LED_HOLE_Z_OFF
-    for sx in (LED_HOLES_SPACING / 2.0, -LED_HOLES_SPACING / 2.0):
-        post = cyl_y(sx, led_hole_z, LED_POST_R, LED_CAV_Y0 - 0.5, LED_BOARD_BOT_Y)
-        pin = cyl_y(sx, led_hole_z, LED_PIN_R, LED_BOARD_BOT_Y - 0.2, LED_BOARD_TOP_Y + 0.5).union(
-            cone_y(sx, led_hole_z, LED_PIN_R, 0.35, LED_BOARD_TOP_Y + 0.5, LED_BOARD_TOP_Y + 0.8))
-        if sx > 0:
-            right_half = right_half.union(post).union(pin)
+    # v3.4: la ESP32 va BOCA ABAJO: la cara de componentes apoya directo en el piso de la bahia
+    # (sin postes) y los headers miran hacia el plano de corte. Solo hay 4 machos que la sujetan.
+    esp_zc = ESP_Z0 + 0.5 + ESP_BOARD_L / 2.0
+    floor_x = -9.0 + ESP_RAISE
+    pcb_back_x = floor_x + ESP_TOP_H             # cara trasera de la placa (de donde salen los headers)
+    for sy in (ESP_HOLE_DY / 2.0, -ESP_HOLE_DY / 2.0):
+        for sz in (esp_zc - ESP_HOLE_DZ / 2.0, esp_zc + ESP_HOLE_DZ / 2.0):
+            pin = cyl_x(sy, sz, ESP_PIN_R, floor_x - 0.5, pcb_back_x + ESP_PIN_PROTRUDE)
+            left_half = left_half.union(pin)
+
+    # v3.5: SIN postes ni pines del LED (estorbaban al insertar la placa). La placa KY-016 entra
+    # deslizando desde el plano de corte y apoya en un reborde estrecho en los dos extremos de X
+    # de cada mitad (|X| = 8.0 a 10.2, cara superior a la altura de la cara inferior de la placa).
+    for sx0, sx1 in ((LED_LEDGE_X0, LED_CAV_HX), (-LED_CAV_HX, -LED_LEDGE_X0)):
+        ledge = box_xyz(sx0, sx1, LED_CAV_Y0 - 0.5, LED_BOARD_BOT_Y,
+                        LED_Z - LED_BOARD_Z / 2.0 - 0.7, LED_Z + LED_BOARD_Z / 2.0 + 0.7)
+        if sx0 > 0:
+            right_half = right_half.union(ledge)
         else:
-            left_half = left_half.union(post).union(pin)
+            left_half = left_half.union(ledge)
 
     for bz, by in CLAMSHELL_BOLTS:
         f = bolt_features(bz, by)
@@ -583,12 +707,19 @@ def build_components() -> dict[str, tuple[cq.Workplane, tuple[float, float, floa
 
     # ESP32 DevKit v1: placa 55 x 28.5; X -7.5 (pines/soldaduras) a +6.4 (modulo/USB)
     ez0 = ESP_Z0 + 0.5
-    c["ESP32_devkit"] = (box_xyz(1.0 - ESP_PINS_H, 1.0 + ESP_TOP_H, -ESP_BOARD_W / 2.0, ESP_BOARD_W / 2.0, ez0, ez0 + ESP_BOARD_L),
+    esp_floor = -9.0 + ESP_RAISE
+    esp_zc_env = ez0 + ESP_BOARD_L / 2.0
+    esp_back = esp_floor + ESP_TOP_H
+    c["ESP32_devkit"] = (box_xyz(esp_floor + 0.05, esp_back, -ESP_BOARD_W / 2.0, ESP_BOARD_W / 2.0, ez0, ez0 + ESP_BOARD_L),
                          (0.10, 0.45, 0.20))
+    for k, sgn in enumerate((1.0, -1.0)):
+        c[f"ESP32_pines_{k}"] = (box_xyz(esp_back, esp_back + ESP_PINS_H,
+                                         sgn * ESP_HEADER_Y - 1.0, sgn * ESP_HEADER_Y + 1.0,
+                                         esp_zc_env - ESP_HEADER_HALF_Z, esp_zc_env + ESP_HEADER_HALF_Z), (0.10, 0.45, 0.20))
 
     # Ficha USB-C con funda y alivio de tension (supuesto 24 x 12 x 6.5 mm); el receptaculo
     # (3 x 8 mm) esta centrado en el borde trasero, sobre la cara de componentes
-    c["Ficha_USB_C"] = (box_xyz(0.9, 7.4, -6.0, 6.0, USB_BAY_Z0 + 0.5, ESP_Z0 + 0.5), (0.20, 0.20, 0.20))
+    c["Ficha_USB_C"] = (box_xyz(esp_floor + 0.05, esp_floor + 6.5, -6.0, 6.0, USB_BAY_Z0 + 0.5, ESP_Z0 + 0.5), (0.20, 0.20, 0.20))
 
     # Motor vibrador: cuerpo Ø27 x 12.45 (X<0) + eje/desbalance hasta 23 mm (X>0)
     c["Motor_cuerpo"] = (cyl_x(MOTOR_Y, MOTOR_Z, MOTOR_DIA / 2.0, -MOTOR_BODY_H, 0.0), (0.65, 0.65, 0.70))
@@ -599,6 +730,8 @@ def build_components() -> dict[str, tuple[cq.Workplane, tuple[float, float, floa
     c["Circuito_MOSFET"] = (box_xyz(-6.0, 6.0, -8.0, 4.0, DUCT_Z0 + 2.0, DUCT_Z0 + 28.0), (0.80, 0.20, 0.20))
 
     # Haz de 10 cables AWG28-30 (Ø1.3) en 2 filas de 5: 6.5 x 2.6 mm
+    c["Haz_cables_inferior"] = (box_xyz(-3.25, 3.25, 0.5 * (CHB_Y0 + CHB_Y1) - 0.65, 0.5 * (CHB_Y0 + CHB_Y1) + 0.65, CH_Z0 + 1.0, CH_Z1 - 1.0),
+                                (0.90, 0.60, 0.10))
     c["Haz_cables_10x"] = (box_xyz(-3.25, 3.25, 0.5 * (CH_Y0 + CH_Y1) - 1.3, 0.5 * (CH_Y0 + CH_Y1) + 1.3, CH_Z0 + 1.0, CH_Z1 - 1.0),
                            (0.90, 0.80, 0.10))
 
@@ -613,8 +746,8 @@ def build_components() -> dict[str, tuple[cq.Workplane, tuple[float, float, floa
                                  LED_Z - LED_BOARD_Z / 2.0, LED_Z + LED_BOARD_Z / 2.0 - 4.0), (0.90, 0.80, 0.10))
 
     # MPU6050 GY-521 sobre la pared X=+8: placa 20.3 (Y) x 15.6 (Z) x 1.6 (X)
-    mz0, mz1 = MPU_HOLES_Z
-    c["MPU6050"] = (box_xyz(6.4, 8.0, MPU_HOLE_Y + 3.5 - 20.3, MPU_HOLE_Y + 3.5, mz0 - 0.1, mz1 + 0.1),
+    c["MPU6050"] = (box_xyz(6.4, 8.0, min(MPU_STUD_Y) - 0.1, max(MPU_STUD_Y) + 0.1,
+                            MPU_STUD_Z + 3.5 - MPU_BOARD_Z_LEN, MPU_STUD_Z + 3.5),
                     (0.10, 0.20, 0.70))
 
     # Placa GY-530 (VL53L0X) 19 x 12.5 (maximo que admite el pod) x 1.6 sobre el piso del pod
@@ -704,14 +837,24 @@ def verify_clearances(shell: cq.Workplane, pod: cq.Workplane) -> bool:
     d_esp_motor = _dist(cuts["esp32_bay"], cuts["motor_weight_pocket"])
     d_ch_motor = _dist(cuts["wire_channel_top"], cuts["motor_weight_pocket"])
     print(f"  Pared bahia ESP32 -> bolsillo motor: {d_esp_motor:.2f} mm ; canal de cables -> bolsillo motor: {d_ch_motor:.2f} mm")
+    d_chb_motor = _dist(cuts["wire_channel_bot"], cuts["motor_weight_pocket"])
+    d_chb_ext = _dist(cuts["wire_channel_bot"], build_outer_envelope_shell())
+    d_cht_ext = _dist(cuts["wire_channel_top"], build_outer_envelope_shell())
+    print(f"  Canal inferior -> bolsillo motor: {d_chb_motor:.2f} mm ; canal inferior -> exterior: {d_chb_ext:.2f} mm ; canal superior -> exterior: {d_cht_ext:.2f} mm")
+    if d_chb_motor < 1.0 or d_chb_ext < 1.0 or d_cht_ext < 1.0:
+        ok = False
+    d_cav_ext = _dist(cuts["motor_zone_cavity"], build_outer_envelope_shell())
+    print(f"  Zona del motor vaciada: pared cavidad -> exterior {d_cav_ext:.2f} mm ; anillo del motor {MOTOR_BOSS_WALL:.1f} mm ; costillas {MOTOR_RIB_T:.0f} mm")
+    if d_cav_ext < 1.5:
+        ok = False
     for n in ("motor_body_pocket", "motor_weight_pocket", "motor_back_relief"):
         d = _dist(cuts[n], build_outer_envelope_shell())
         print(f"  Pared minima exterior de {n}: {d:.2f} mm")
         if d < 1.5:
             ok = False
-    print(f"  Canal de cables: {2*CH_HX:.1f} x {CH_Y1-CH_Y0:.1f} = {2*CH_HX*(CH_Y1-CH_Y0):.0f} mm2 ; "
-          f"10 cables AWG28 (Ø1.3) ocupan {10*math.pi/4*1.3**2:.1f} mm2 ({100*10*math.pi/4*1.3**2/(2*CH_HX*(CH_Y1-CH_Y0)):.0f} %); "
-          f"en 2 filas de 5: 6.5 x 2.6 mm (cabe en {2*CH_HX:.0f} x {CH_Y1-CH_Y0:.0f})")
+    print(f"  Canal de cables: {CH_X1-CH_X0:.1f} x {CH_Y1-CH_Y0:.1f} = {(CH_X1-CH_X0)*(CH_Y1-CH_Y0):.0f} mm2 ; "
+          f"10 cables AWG28 (Ø1.3) ocupan {10*math.pi/4*1.3**2:.1f} mm2 ({100*10*math.pi/4*1.3**2/((CH_X1-CH_X0)*(CH_Y1-CH_Y0)):.0f} %); "
+          f"en 2 filas de 5: 6.5 x 2.6 mm (cabe en {CH_X1-CH_X0:.0f} x {CH_Y1-CH_Y0:.1f})")
     # LED KY-016
     exterior = build_outer_envelope_shell()
     d_led_ext = _dist(cuts["led_cavity"], exterior)
@@ -777,7 +920,16 @@ def validate_and_export(shape: cq.Workplane, name: str, stl_transform=None) -> N
 
     cq.exporters.export(shape, str(STEP_DIR / f"{name}.step"), exportType="STEP")
     stl_shape = stl_transform(shape) if stl_transform else shape
-    cq.exporters.export(stl_shape, str(STL_DIR / f"{name}.stl"), exportType="STL", tolerance=0.05, angularTolerance=0.1)
+    stl_path = str(STL_DIR / f"{name}.stl")
+    # Si la malla no queda cerrada (fisuras de teselado en los redondeos) se reintenta con otras tolerancias
+    for tol, ang in ((0.05, 0.1), (0.03, 0.08), (0.02, 0.05), (0.08, 0.2), (0.04, 0.15), (0.06, 0.12)):
+        cq.exporters.export(stl_shape, stl_path, exportType="STL", tolerance=tol, angularTolerance=ang)
+        try:
+            import trimesh
+            if trimesh.load(stl_path).is_watertight:
+                break
+        except ImportError:
+            break
 
 
 def main() -> None:

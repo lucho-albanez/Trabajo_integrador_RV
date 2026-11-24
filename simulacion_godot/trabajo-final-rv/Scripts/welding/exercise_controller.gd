@@ -30,6 +30,8 @@ const END_MARGIN_MM := 1.0
 @export var holder: ElectrodeHolder
 @export var spot: WeldingSpot
 @export var coupon: Coupon
+## Anclaje de la mesa de trabajo donde se conecta la pinza de masa.
+@export var clamp_anchor: ClampAnchor
 @export var hud: Hud
 @export var report_window: ReportWindow
 ## Cable del portaelectrodo: se oculta mientras se suelda para no tapar la vista de la junta.
@@ -44,6 +46,8 @@ var report: Dictionary = {}
 
 var _haptics: HapticController
 var _vfx: ArcVFX
+## Preparación guiada: los pasos 1 a 5 se ejecutan con las teclas numéricas, en orden.
+var sequence: SetupSequence
 var _s_mm: float = 0.0
 var _v_mm: float = 0.0
 var _speed_smooth: float = 0.0
@@ -80,6 +84,13 @@ func _ready() -> void:
 	_vfx.name = "ArcVFX"
 	add_child(_vfx)
 
+	sequence = SetupSequence.new()
+	sequence.name = "SetupSequence"
+	add_child(sequence)
+	sequence.setup(player, machine, ground_clamp, holder, clamp_anchor, level, start_exercise)
+	sequence.notice.connect(func(text: String, seconds: float) -> void: hud.show_message(text, seconds))
+	player.interactor.set_active(false)  # no se interactúa a mano: todo va por la secuencia
+
 	hud.setup(level)
 	coupon.set_guide_visible(level.show_color_guides)
 	hud.pause_requested.connect(_set_paused.bind(true))
@@ -100,7 +111,7 @@ func _ready() -> void:
 	_away_dir = flat.normalized() if flat.length() > 0.001 else Vector3.FORWARD
 
 	_set_state(State.SETUP)
-	hud.show_message("%s - preparate: encendé la máquina, conectá la pinza y tomá el portaelectrodo." % level.display_name, 5.0)
+	hud.show_message("%s - preparación guiada: presioná los números 1 a 5 en orden." % level.display_name, 5.0)
 
 
 func _exit_tree() -> void:
@@ -128,10 +139,25 @@ func _unhandled_input(event: InputEvent) -> void:
 		hud.show_message("Orientación (yaw) reiniciada", 1.5)
 	elif event.is_action_pressed("replace_electrode"):
 		_try_replace_electrode()
-	elif event.is_action_pressed("start_exercise") and state == State.SETUP:
-		start_exercise()
+	elif state == State.SETUP and _handle_setup_input(event):
+		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("finish_exercise") and state == State.WELDING:
 		finish_exercise()
+
+
+## Teclas 1-5: pasos de la preparación. Rueda del mouse: amperaje (paso 4).
+func _handle_setup_input(event: InputEvent) -> bool:
+	for i in range(1, SetupSequence.LAST_STEP + 1):
+		if event.is_action_pressed("step_%d" % i):
+			sequence.request(i)
+			return true
+	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
+		var button := (event as InputEventMouseButton).button_index
+		if button == MOUSE_BUTTON_WHEEL_UP:
+			return sequence.adjust_amperage(1)
+		if button == MOUSE_BUTTON_WHEEL_DOWN:
+			return sequence.adjust_amperage(-1)
+	return false
 
 
 func _set_paused(paused: bool) -> void:
@@ -182,7 +208,8 @@ func _set_state(new_state: int) -> void:
 			hud.set_checklist_visible(true)
 			hud.set_gauges_visible(false)
 			hud.set_crosshair_visible(true)
-			hud.set_help("WASD mover  |  E interactuar  |  Q careta  |  C agacharse  |  Esc pausa")
+			hud.set_crosshair_visible(false)
+			hud.set_help("Teclas 1 a 5: pasos en orden  |  Rueda: amperaje (paso 4)  |  Q careta  |  Esc pausa")
 		State.CALIBRATING:
 			hud.set_phase("2/3  Calibración")
 			hud.set_checklist_visible(false)
@@ -215,10 +242,6 @@ func missing_requirements() -> Array[String]:
 		missing.append("Conectar la pinza de masa a la mesa")
 	if not holder.is_held:
 		missing.append("Tomar el portaelectrodo")
-	if spot.is_active and not spot.contains(player):
-		missing.append("Pararte sobre la marca amarilla")
-	elif not spot.is_active:
-		missing.append("Pararte sobre la marca amarilla (aparece al conectar la pinza)")
 	return missing
 
 
@@ -304,23 +327,8 @@ func _physics_process(delta: float) -> void:
 
 
 func _update_setup_ui() -> void:
-	var items: Array = []
-	items.append({"text": "Encender la máquina de soldar", "done": machine.is_on})
-	var amp_text := "Regular el amperaje"
-	if level.show_current_hint:
-		amp_text += " (%.0f-%.0f A)" % [level.current_band.x, level.current_band.y]
-	var amp_ok := machine.is_on and float(machine.current_amperage) >= level.current_band.x \
-		and float(machine.current_amperage) <= level.current_band.y
-	items.append({"text": amp_text, "done": amp_ok})
-	items.append({"text": "Conectar la pinza de masa a la mesa", "done": ground_clamp.is_clamped})
-	items.append({"text": "Tomar el portaelectrodo", "done": holder.is_held})
-	items.append({"text": "Pararte sobre la marca amarilla", "done": spot.contains(player)})
-	hud.set_checklist(items)
-
-	var prompt := player.interactor.get_prompt()
-	if prompt.is_empty() and missing_requirements().is_empty():
-		prompt = "[F] Comenzar el ejercicio"
-	hud.set_prompt(prompt)
+	hud.set_checklist(sequence.get_items(), "Preparación (teclas 1 a 5)")
+	hud.set_prompt(sequence.get_prompt())
 	hud.set_amperage(float(machine.current_amperage), machine.is_on)
 	hud.set_electrode(holder.remaining_fraction(), holder.length_mm, holder.electrodes_used)
 	hud.set_progress(0.0, 0.0)

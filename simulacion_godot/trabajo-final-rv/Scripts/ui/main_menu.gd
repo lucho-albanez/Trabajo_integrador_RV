@@ -78,7 +78,7 @@ func _build() -> void:
 	box.add_child(quit)
 
 	var help := Label.new()
-	help.text = "Controles: WASD mover - mouse mirar - E interactuar - Q careta - C agacharse - Esc pausa"
+	help.text = "Preparación guiada: teclas 1 a 5 en orden - rueda del mouse: amperaje - Q careta - Esc pausa"
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	help.add_theme_font_size_override("font_size", 12)
 	help.add_theme_color_override("font_color", Color(0.6, 0.6, 0.65))

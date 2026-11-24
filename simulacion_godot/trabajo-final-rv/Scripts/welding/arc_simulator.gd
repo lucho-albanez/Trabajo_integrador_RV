@@ -17,10 +17,10 @@ enum Zone { NONE, SHORT, OPTIMAL, LONG }
 signal state_changed(new_state: int, reason: String)
 signal strike_failed(reason: String)
 
-@export var strike_max_gap_mm: float = 8.0
-@export var stick_time_s: float = 0.60
-@export var extinguish_time_s: float = 0.40
-@export var free_gap_mm: float = 1.5   # distancia a la que se libera un electrodo pegado
+@export var strike_max_gap_mm: float = 4.5
+@export var stick_time_s: float = 0.35
+@export var extinguish_time_s: float = 0.15
+@export var free_gap_mm: float = 2.5   # distancia a la que se libera un electrodo pegado
 
 var state: int = State.OFF
 var zone: int = Zone.NONE

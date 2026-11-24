@@ -7,7 +7,7 @@
 
 | Tema | v2.2 | v3.1 |
 |---|---|---|
-| Largo total de la carcasa | 324 mm (Z −182 → +142) | **220 mm** (Z −78 → +142) |
+| Largo total de la carcasa | 324 mm (Z −182 → +142) | **250 mm** (Z −108 → +142; v3.9, antes 220) |
 | Sensor de distancia | ToF genérico (VL6180X / VL53L1X / VL53L0X) | **VL53L0X** (módulo tipo GY-530; también entran Pololu y Adafruit) |
 | Cavidad de la placa ToF | 25,0 × 19,0 mm (holgura 0 para una GY-530 de 25 mm) | **21 × 14,5 mm**, ventana óptica alargada de 12 × 9 mm (v3.2: cavidad 21 mm y ventana 12 mm a pedido) |
 | Motor vibrador | bolsillo Ø10,6 × 6,1 mm (moneda de 10 mm) | **Ø27 mm, 23 mm de alto** (bolsillo Ø27,75 / Ø29,0) |
@@ -77,7 +77,7 @@ Se mantuvo todo lo que va de Z = 48 hacia adelante (collarín, guarda-mano, cabe
 | Collarín / guarda-mano | collarín 48 a 55, guarda-mano 55 a 72 | guarda-mano más grueso (17 mm) por el LED; aloja el LED KY-016 (sección 10) |
 | Cabezal | 72 a 142 | sin cambios |
 
-Para imprimir en la Ender 3 V2 (cama 220 × 220 mm): cada mitad apoyada sobre la cara plana tiene una huella de 220 × 66 mm. **En ese eje entra justo, sin margen**. Rotá la pieza **45° en Z** en el slicer: la huella pasa a ~179 × 182 mm. Las mitades miden 30 mm (derecha) y 27 mm (izquierda) de alto.
+Para imprimir en la Ender 3 V2 (cama 220 × 220 mm): cada mitad apoyada sobre la cara plana tiene una huella de 250 × 66 mm: **no entra derecha** en la cama de 220 mm. Rotá la pieza **45° en Z** en el slicer (gira entre 44° y 46°): la huella pasa a unos **202 × 202 mm**, o sea ~9 mm de margen por lado en la cama de 220 × 220 mm. Las mitades miden 30 mm (derecha) y 27 mm (izquierda) de alto.
 
 ## 5. Motor vibrador Ø27 mm
 
@@ -121,18 +121,19 @@ El orificio de la cola (Ø5,4 mm) es la entrada del cable USB-C de alimentación
 
 | Tornillo (Z, Y) | Zona | Largo M3 |
 |---|---|---|
-| (−62; ±12) ×2 | prensacable | **35 mm** (mín. 30,2) |
-| (−30; ±18,5) ×2 | ESP32 | **25 mm** (mín. 24,0) |
-| (25; −19,5) ×1 | motor (arriba pasa el canal de cables) | **25 mm** (mín. 21,1) |
+| (−92; ±12) ×2 | extremo trasero (v3.9) | **35 mm** (mín. 30,2) |
+| (−62; ±12) ×2 | prensacable / bahía USB (ahora en el mango, v3.9) | **40 mm** (mín. 35,9) |
+| (−30; ±19,3) ×2 y (−4,5; ±19,3) ×2 | zona ESP32 | **25 mm** (mín. 21,7) |
+| (49,5; −19,5) ×1 | detrás del collarín | **25 mm** (mín. 21,1) |
 | (58,5; +30) y (66; −21) | guarda-mano | **35 mm** (mín. 30,7) |
 
-Total: 7 tornillos con cabeza Allen y 7 tuercas M3. Los pozos de los tornillos del guarda-mano se hicieron 10 mm más profundos para pasar de ~50 mm a 35 mm. Los otros tornillos M3 no cambian: 1 de 18–20 mm para la colisa, 1 de 10–12 mm para regular el pulsador, 2 de 10 mm para el pod, 2 de 10–12 mm para el ArUco y 2 de 16–20 mm para el MPU6050 (con sus tuercas).
+Total: **11** tornillos con cabeza Allen y 11 tuercas M3. Los pozos de los tornillos del guarda-mano se hicieron 10 mm más profundos para pasar de ~50 mm a 35 mm. Los otros tornillos M3 no cambian: 1 de 18–20 mm para la colisa, 1 de 10–12 mm para regular el pulsador, 2 de 10 mm para el pod, 2 de 10–12 mm para el ArUco y 2 de 16–20 mm para el MPU6050 (con sus tuercas).
 
 ## 8. Verificaciones que corre el script
 
 Al ejecutar `generate_holder_cad.py` se comprueba (todo **OK** en esta versión):
 
-1. Cada mitad es un único sólido y la longitud total es 220,0 mm.
+1. Cada mitad es un único sólido y la longitud total es 250,0 mm.
 2. Los tornillos (agujero, cabeza y tuerca) quedan ≥ 0,6 mm de cualquier cavidad (mínimo real: 0,68 mm, tuerca del tornillo del motor).
 3. Los pines guía quedan ≥ 0,6 mm de cualquier cavidad (mínimo real: 1,10 mm).
 4. Las estrías de agarre no pisan tornillos ni pines.
@@ -178,3 +179,86 @@ python preview_cad.py            # preview_cad.png con cortes
 ```
 
 Todas las cotas están al inicio del script (`TOTAL_LEN`, `MOTOR_*`, `TOF_*`, `CH_*`, `CLAMSHELL_BOLTS`, etc.).
+
+
+## 11. Ajustes v3.2 (canales de cables y ESP32)
+
+- **Piso de la ESP32** 2 mm más bajo que en v3.1 (bahía X −11 a +9); placa, ranura y bahía USB-C bajan con él. Los tornillos de la zona ESP32 pasaron a Y = ±19,3.
+- **Canal superior:** llega a X = −11, a la altura del piso de la ESP32 (en la mitad derecha, 6,9 mm). Sección 17,9 × 2,9 mm (Y 14,7 a 17,6): se bajó la altura para conservar ≥ 1 mm de pared contra las estrías del exterior.
+- **Canal inferior (espejo)** bajo el motor: X −9 a +6,9, Y −18,6 a −16,6 (2 mm de alto), con su rampa y subida al ducto.
+- **Aristas redondeadas** (radio 2 mm, 1,2 mm en el canal inferior) en rampa, canal y subida de cables, y en las esquinas de la muesca del motor (1,5 mm), para que el cable no doble sobre un filo vivo.
+- El tornillo de cierre de la zona del motor se reemplazó por dos delante de la ESP32 (Z −4,5; Y ±19,3) y uno en Z = 49,5 (Y −19,5).
+
+## 12. Machos de sujeción de la ESP32 (v3.4)
+
+- La ESP32 va **boca abajo**: su cara de componentes apoya directo en el piso de la bahía (X = −11), sin postes, y los headers miran hacia el plano de corte.
+- 4 machos Ø2,8 mm salen del piso, en los agujeros de la placa: **47 mm** entre centros en el lado largo y **23 mm** en el corto, centrados (Z = −45,2 y +1,8; Y = ±11,5). Atraviesan la placa y asoman 1 mm: se funden con el soldador o se fijan con una gota de pegamento.
+- Como la ficha USB-C queda del lado de los componentes (hacia el piso), la bahía de la ficha se profundizó 3 mm (X desde −13,5) y la envolvente de la ficha se bajó a X −11 a −4,5.
+- **Supuestos:** componentes de 3,4 mm de alto bajo la placa (5 mm − 1,6 mm de PCB); agujeros de la placa de Ø3,0–3,2; headers de 30 pines (15 por lado, a Y = ±12,7). Los headers llegan hasta X = +3, lejos de la pared de la mitad derecha (X = +9).
+
+## 13. Alojamiento del LED KY-016 despejado (v3.5)
+
+- Se eliminaron los **postes Ø5 y los pines Ø1,9** del LED, en las dos mitades: estorbaban al insertar la placa.
+- Se retiró el material que había entre la subida de cables, la cámara del cabezal y la cavidad de la placa (zona |X| < 8, Y 10 a 20,8, Z 58 a 73,7; en v3.5b se bajó de Y 14 a Y 10 para sacar un resto de pared de Z 66 a 70). Ahora es un solo hueco abierto desde el plano de corte.
+- La placa asienta en un **reborde estrecho** (|X| = 8,0 a 10,2 mm, a lo largo de la placa) en cada mitad, con la cara superior a Y = 22,8 (cara inferior de la placa). Sin tornillos ni pines: al cerrar la carcasa queda atrapada entre los dos rebordes y el techo.
+- Montaje: la placa entra deslizando desde el plano de corte con el LED hacia arriba, hasta que el LED quede en el semiagujero de Ø6,4 mm.
+
+## 14. Hueco del pulsador (v3.6)
+
+- El hueco del pulsador de cebado pasó de 6,4 × 6,4 mm a **12 × 12 × 4 mm** (Y 10 a 14), centrado en el eje del electrodo (X = 0, Z = 126), para que el tornillo del electrodo lo presione bien. El hueco anterior de 6 × 6 mm era un error.
+- Pared mínima: 1,0 mm hasta el agujero del tornillo del ArUco; el resto, más de 2 mm.
+
+## 15. MPU6050 sobre machos (v3.7)
+
+- En la mitad derecha, los 2 agujeros con tuerca del MPU6050 se reemplazaron por **2 machos M3 (Ø2,9 mm)** que salen de la pared plana del cabezal (X = +8) y asoman 2,4 mm sobre la placa. Ya no hay agujeros pasantes ni nidos de tuerca.
+- Los machos están a **16 mm entre centros**, ambos a Z = 95,6: el de arriba queda en Y = +12,5 y el otro se pasó a su derecha, en Y = −3,5.
+- La placa (20,3 mm en Z) queda con los agujeros a 3,5 mm de su extremo +Z, entre Z 78,8 y 99,1; sin interferencias.
+
+## 16. Ventana del pod ToF (v3.8)
+
+- La ventana pasó de 12 a **14 mm** en X.
+- Se eliminaron las dos tiras del piso que quedaban arriba y abajo de la ventana (de 2,75 mm cada una): ahora la ventana mide **14 × 14,5 mm**, es decir, todo el largo de la cavidad en Z.
+- El sensor apoya en los dos laterales del piso que quedan a cada lado (3,5 mm por lado, de |X| = 7 a 10,5).
+
+## 17. Herramienta más larga: 250 mm (v3.9)
+
+- El largo total pasó de 220 a **250 mm** (Z −108 a +142). El alargamiento es todo en la cola: el mango y el cono del prensacable se corrieron 30 mm hacia atrás. La bahía USB, la bahía de la ESP32, el motor, los canales de cables y toda la cabeza **no cambian de posición**.
+- El túnel del cable USB (Ø5,4 mm) es 30 mm más largo; el ojal para precinto quedó pegado a la bahía USB.
+- **Tornillos:** como los dos de Z = −62 ahora caen en el mango (pared más gruesa), necesitan **M3 × 40**. Para que la cola no quede abierta se agregaron 2 tornillos más en Z = −92 (M3 × 35), y 2 pines guía en Z = −84. Total: 11 tornillos y 11 tuercas M3.
+- Nueva estría de agarre en Z = −77 a −72,5.
+- **Ender 3 V2:** cada mitad, girada ~45° en Z, ocupa unos **202 × 202 mm** (cama 220 × 220), con ~9 mm de margen por lado para falda o brim. El largo máximo que aún entra en diagonal con ese margen mínimo de 5 mm por lado es de unos 265 mm.
+
+## 18. ESP32 y motor más atrás, mango más grueso (v3.10)
+
+- **Largo total:** sigue en 250 mm (Z −108 a +142).
+- **ESP32, motor y canales corridos 20 mm hacia atrás** (para ganar lugar de ensamble delante): bahía ESP32 Z −68 a −12 (antes −48 a +8), bahía USB-C Z −92 a −66, motor con centro en Z = 5 (antes 25), canales de cables desde Z −20 hasta el ducto delantero (Z 46). Entre el motor y el ducto quedó más lugar; la muesca de los cables del motor es ahora de 9 mm de ancho (antes 6).
+- **Diámetro del mango: Ø54 mm** (antes Ø46). Collarín Ø56 (antes Ø50) y guarda-mano de 56 mm de ancho (antes 54). La huella de impresión no cambia (la altura del guarda-mano ya era de 66 mm), así que cada mitad sigue ocupando ~202 × 202 mm en diagonal en la Ender 3 V2.
+- **Más espacio para cables:**
+  - Canal superior: 5,3 mm de alto (antes 2,9), 18 mm de profundidad → 95 mm² (antes ~52 mm²).
+  - Canal inferior: 3,8 mm de alto (antes 2,0).
+  - Bahía de la ESP32: 32 mm de ancho (antes 29,6).
+  - Las paredes exteriores de los canales quedan en ≥ 3 mm.
+- **Tornillos (11, igual cantidad):** (Z −102, ±9) ×2, (−80, ±12) ×2, (−60, ±20) ×2, (−34, ±20) ×2, (49,5; −19,5), y los 2 del guarda-mano. Los pozos de cabeza/tuerca se hicieron más hondos para que alcancen tornillos más cortos. En la zona del motor y los canales no hay lugar para tornillos: la unión de las mitades ahí la mantienen 6 pines guía nuevos (Z −16, 6 y 34, a Y = ±23), además de los tornillos de los extremos.
+- **Estrías de agarre:** 7, recolocadas entre tornillos y pines.
+- **Pines guía:** 13 en total.
+
+## 19. Zona del motor vaciada (v3.11)
+
+- El bloque macizo que rodeaba al motor (entre los dos canales de cables, en las dos mitades) se eliminó. Ahora la zona Z −9,5 a 44 es una sola cavidad abierta hacia la pared exterior, que queda con 3 mm de espesor (1,8 mm bajo las estrías).
+- Solo quedan: un **anillo de 1,8 mm** alrededor del bolsillo del motor (Ø27,75 en la mitad izquierda, Ø29 en la derecha), una **plataforma maciza** bajo el alojamiento (mitad izquierda), de 8 mm de alto, desde la pared exterior hasta el piso de la salida de cables del motor (X = −16), y una **costilla de 3 mm** en la mitad derecha que une el anillo con la pared exterior y un taco de Ø6,8 mm alrededor de cada pin guía de la zona (Z 6 y 34, Y = ±23).
+- La cavidad se une con el ducto delantero (Z 40,5) y con los canales; los cables ya no están limitados por los canales de 5 mm: tienen todo el espacio libre alrededor del anillo.
+- Se mantiene una pared de 2,5 mm contra la bahía ESP32.
+- Al imprimir con el corte hacia abajo, el techo curvo de la cavidad puede pedir soportes (o usar puentes) en su parte más alta.
+
+## 20. Plataforma maciza bajo el motor (v3.12)
+
+- En la mitad izquierda, la costilla de 3 mm que unía el anillo del motor con la pared exterior se reemplazó por una **plataforma maciza**: ocupa toda la huella del alojamiento (≈ 32 × 32 mm en Y y Z) y sube **8 mm** desde el fondo de la cavidad (pared exterior, X ≈ −24) hasta X = −16, que es el piso del orificio por donde salen los cables del motor.
+- La mitad derecha conserva su costilla de 3 mm.
+- **v3.13:** la plataforma se prolongó **22,7 mm hacia adelante**, hasta la pared frontal de la cavidad (Z = 44), con el mismo ancho (≈ 32 mm en Y) y la misma altura de 8 mm. Se repitió **espejada en la carcasa derecha** (piso a X = +16, 8 mm desde la pared exterior); la costilla de 3 mm de la derecha se mantiene para unir el anillo del motor con la pared.
+
+## 20. Plataforma de la ESP32 2 mm más baja (v3.14)
+
+- El piso de la ESP32 en la mitad izquierda baja de X = −11 a **X = −13** (la bahía queda 2 mm más honda: X −13 a +9).
+- Se mueven con ella: los 4 machos de sujeción, la bahía de la ficha USB-C y los canales de cables (que van a la altura del piso de la ESP32, ahora 19,9 × 5,3 mm arriba).
+- El canal superior queda con 1,95 mm de pared contra el exterior. Tornillos, pines guía y plataforma del motor no cambian.
+
