@@ -51,10 +51,34 @@ def find_port():
     return ports[0].device
 
 
+LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "tools", "puente_log.txt")
+
+
+def log(msg):
+    """Imprime y guarda en tools/puente_log.txt (diagnóstico)."""
+    line = time.strftime("%H:%M:%S ") + msg
+    print(line)
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
 def open_command_socket():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(("0.0.0.0", COMMAND_PORT))
+    # Uso EXCLUSIVO del puerto de comandos: con SO_REUSEADDR, en Windows un segundo puente
+    # (abierto desde la GUI y desde un .bat) se quedaba con los comandos de Godot (vibración,
+    # LED) sin tener el puerto del ESP32, y la herramienta nunca los recibía.
+    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    try:
+        s.bind(("0.0.0.0", COMMAND_PORT))
+    except OSError:
+        log(f"ERROR: el puerto UDP {COMMAND_PORT} ya está en uso: hay OTRO puente abierto. "
+            "Cerrá todas las ventanas del puente y abrí uno solo.")
+        time.sleep(8)
+        sys.exit(1)
     s.setblocking(False)
     return s
 
@@ -71,7 +95,8 @@ def run_serial(port_name):
             continue
         try:
             with serial.Serial(port, BAUD, timeout=0.02) as ser:
-                print(f"Conectado a {port}. Reenviando a UDP {GODOT_ADDR[0]}:{GODOT_ADDR[1]} (Ctrl+C para salir)")
+                log(f"Conectado a {port}. Reenviando a UDP {GODOT_ADDR[0]}:{GODOT_ADDR[1]} (Ctrl+C para salir)")
+                ser.write(b'{"cmd":"PING"}\n')
                 
                 # Enviar configuración de herramienta si existe
                 cfg_candidates = [
@@ -91,6 +116,9 @@ def run_serial(port_name):
                             print(f"  -> Aviso al cargar configuracion: {e}")
 
                 buf = b""
+                last_h = None
+                max_h = 0
+                n_hap = n_led = max_hap = 0
                 count, t0 = 0, time.time()
                 while True:
                     chunk = ser.read(256)
@@ -100,6 +128,16 @@ def run_serial(port_name):
                             line, buf = buf.split(b"\n", 1)
                             line = line.strip()
                             if line.startswith(b"{") and line.endswith(b"}"):
+                                if b'"ack"' in line:
+                                    log("  ESP32: " + line.decode(errors="replace"))
+                                else:
+                                    i = line.find(b'"h":')
+                                    if i >= 0:
+                                        try:
+                                            last_h = int(line[i + 4:].split(b",")[0].split(b"}")[0])
+                                            max_h = max(max_h, last_h)
+                                        except ValueError:
+                                            pass
                                 out.sendto(line, GODOT_ADDR)
                                 try:
                                     out.sendto(line, VISION_ADDR)
@@ -110,15 +148,29 @@ def run_serial(port_name):
                             buf = b""
                     try:
                         while True:
-                            data, _ = cmd.recvfrom(512)
+                            data, src = cmd.recvfrom(8192)   # CONFIG mide ~700 bytes (antes se cortaba en 512)
                             ser.write(data.strip() + b"\n")
+                            if b"SET_HAPTIC" in data:
+                                n_hap += 1
+                                try:
+                                    v = int(json.loads(data.decode()).get("val", 0))
+                                    max_hap = max(max_hap, v)
+                                except Exception:
+                                    pass
+                            elif b"SET_LED" in data:
+                                n_led += 1
+                            else:
+                                log(f"  -> ESP32 ({src[0]}:{src[1]}): " + data.decode(errors="replace").strip()[:200])
                     except BlockingIOError:
                         pass
                     if time.time() - t0 >= 5.0:
-                        print(f"  {count / (time.time() - t0):.0f} paquetes/s")
+                        h_txt = "sin dato (firmware viejo)" if last_h is None else f"{last_h}/255 (max {max_h})"
+                        log(f"  {count / (time.time() - t0):.0f} paquetes/s | motor en el pin: {h_txt} | "
+                            f"de Godot: {n_hap} SET_HAPTIC (max {max_hap}), {n_led} SET_LED")
+                        max_h = n_hap = n_led = max_hap = 0
                         count, t0 = 0, time.time()
         except (OSError, serial.SerialException) as e:
-            print(f"Puerto perdido ({e}). Reintentando...")
+            log(f"Puerto {port} no disponible o perdido ({e}). Reintentando...")
             time.sleep(1.5)
 
 

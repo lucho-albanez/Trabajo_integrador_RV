@@ -27,6 +27,8 @@ var zone: int = Zone.NONE
 var time_in_arc: float = 0.0           # s desde el último cebado
 var gap_mm: float = 0.0
 var session_active: bool = false       # Sesión de soldadura iniciada por homing inicial
+## Encendido automático: el arco arranca al acercar la punta (sin homing ni gatillo).
+var auto_strike: bool = false
 
 var _prev_trigger: bool = false
 var _needs_release: bool = false
@@ -56,6 +58,13 @@ func step(delta: float, trigger: bool, gap: float, energized: bool, over_plate: 
 			zone = Zone.NONE
 			if rising:
 				_try_strike(gap, energized, over_plate)
+			elif auto_strike and energized and over_plate and not trigger \
+					and gap > WeldPhysics.STICK_GAP_MM and gap <= strike_max_gap_mm:
+				time_in_arc = 0.0
+				_low_timer = 0.0
+				_high_timer = 0.0
+				session_active = true
+				_set_state(State.ARCING, "ignited")
 			elif session_active and energized and over_plate:
 				# Si la sesión ya inició, reencendido por proximidad
 				var reignite_thresh: float = WeldPhysics.REIGNITE_GAP_MM if "REIGNITE_GAP_MM" in WeldPhysics else strike_max_gap_mm
@@ -90,7 +99,7 @@ func step(delta: float, trigger: bool, gap: float, energized: bool, over_plate: 
 		State.OUT:
 			zone = Zone.NONE
 			var reignite_thresh: float = WeldPhysics.REIGNITE_GAP_MM if "REIGNITE_GAP_MM" in WeldPhysics else strike_max_gap_mm
-			if session_active and energized and over_plate:
+			if (session_active or auto_strike) and energized and over_plate:
 				# Reencendido automático al arrimar la herramienta
 				if gap <= reignite_thresh and gap > WeldPhysics.STICK_GAP_MM and not trigger:
 					time_in_arc = 0.0

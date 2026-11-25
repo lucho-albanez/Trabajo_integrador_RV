@@ -88,3 +88,46 @@ Cuando se disponga del sensor láser de tiempo de vuelo I2C (VL53L0X / VL53L1X):
    static IDistanceSensor* activeDistanceSensor = &tofSensor;
    ```
 4. El sistema compilará y operará de forma transparente, eliminando el cono acústico y logrando precisión milimétrica directa.
+
+---
+
+## 4. Seguimiento óptico ArUco: posición de la punta (pose 6D + pivote)
+
+La cámara ve el ArUco del soporte (ID 0), que está unos 10 cm por encima de la punta. `tools/test_vision_table.py` (con `tools/tool_tracking.py`) calcula la punta así:
+
+1. Pose de la cámara respecto de la mesa con los 4 marcadores de la plantilla A4.
+2. Pose 6D (rotación + traslación) del ArUco de la herramienta con sus 4 esquinas.
+3. La punta es un punto **fijo** en el sistema del marcador: `punta = R·p + t`. Si `p` es correcto, inclinar la herramienta no mueve la punta.
+4. `p` se mide con la **calibración de pivote**: punta quieta, herramienta inclinada, y se resuelve `R_i·p + t_i = q` por mínimos cuadrados.
+
+No usa el IMU ni el brazo L para la posición. El cordón por defecto es el de la plantilla (0 a 150 mm).
+
+### Procedimiento
+
+1. Ejecutar `probar_mesa.bat` con el ESP32 conectado. El HUD debe mostrar Mesa 4/4 y Herramienta DETECTADA.
+2. `[C]` calibra el giroscopio (herramienta quieta) y `[T]` tara el yaw.
+3. **`[P]`:** apoyar la punta en la hoja y dejarla **quieta**; inclinar la herramienta hacia adelante/atrás y hacia los costados durante 5–10 s; `[P]` otra vez. Se acepta con residuo de pocos mm.
+4. Verificar: la línea azul cae sobre el cordón impreso, la cruz "PUNTA" está sobre el electrodo (z ≈ 0 apoyada) y "Punta" no se mueve al inclinar.
+
+Repetir el pivote solo si cambia el soporte ArUco. Mover la cámara o la plantilla no lo invalida.
+
+### Teclas
+
+| Tecla | Acción |
+| :--- | :--- |
+| `[C]` / `[T]` | Calibrar gyro / tara de yaw |
+| `[P]` | Iniciar / terminar el pivote |
+| `[ESPACIO]` / `[F]` | Cordón propio (opcional): inicio / fin |
+| `[R]` | Volver al cordón de la plantilla |
+
+### Opcionales
+
+- `"tool_marker_mm"` en `tool_config.json`: lado del cuadrado negro del ArUco de la herramienta (36 por defecto); el pivote lo corrige si está mal.
+- `python tools/calibrar_camara.py`: mide focal y distorsión de la webcam (`camera_intrinsics.json`).
+- Si el IMU está conectado durante el pivote, se calibra una fusión cámara + IMU que reduce el temblor; solo se activa si mejora el residuo.
+
+### Prueba sin hardware
+
+```bash
+python tools/test_tool_tracking.py
+```

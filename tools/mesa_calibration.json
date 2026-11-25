@@ -1,16 +1,29 @@
 {
+  "version": 4,
+  "metodo": "pose 6D del ArUco + calibracion de pivote",
+  "target_len_mm": 150.0,
+  "seam_custom": true,
   "start_pt": [
-    11.203147888183594,
-    -171.83848571777344
+    -3.9129491124943634,
+    6.127401081440668
   ],
   "end_pt": [
-    204.77377319335938,
-    -175.07949829101562
+    145.33127539717586,
+    -1.0442064773691135
   ],
-  "measured_len_mm": 193.6,
-  "target_len_mm": 150.0,
-  "scale_factor": 0.7748,
-  "ref_pitch": 161.9,
-  "ref_roll": 11.0,
-  "tip_lever_mm": 115.0
+  "measured_len_mm": 149.42,
+  "scale_factor": 1.0039,
+  "tool_tip_offset_mm": [
+    6.547,
+    -140.027,
+    -44.518
+  ],
+  "tool_marker_mm_eff": 39.176,
+  "pivot_rms_mm": 4.102,
+  "camera_focal_px": 933.5,
+  "image_size": [
+    1280,
+    720
+  ],
+  "imu_fusion": null
 }

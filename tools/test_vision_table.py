@@ -1,13 +1,30 @@
 #!/usr/bin/env python3
 """
-ArcSim_VR - Seguimiento Espacial en Mesa de Soldadura (v3 - Calibración 2 Puntos)
-================================================================================
-Permite calibrar la escala exacta del cordón físico en 2 pasos:
-  1. Apoyar la punta en el INICIO del cordón y presionar [ESPACIO] -> Fija Origen (0, 0).
-  2. Apoyar la punta en el FINAL del cordón y presionar [F]       -> Calibra Longitud Exacta.
+ArcSim_VR - Seguimiento de la punta del electrodo sobre la mesa (v4: pose 6D + pivote)
+=====================================================================================
+La cámara ve el ArUco del soporte de la herramienta (ID 0), no la punta. En vez de suponer
+dónde está la punta (brazo L + inclinación del IMU), se usa el método estándar de seguimiento
+de instrumentos:
 
-Funciona con cualquier medida de cordón (sea de 90 mm, 120 mm o 150 mm)
-y compensa automáticamente cualquier desvío de escala o ángulo en el cartón.
+  1. Pose de la mesa con los 4 marcadores de la plantilla A4 (posiciones conocidas).
+  2. Pose 6D del ArUco de la herramienta (rotación + traslación) con sus 4 esquinas.
+  3. La punta es un punto FIJO en el sistema del marcador: punta = R @ p + t. Si p es correcto,
+     inclinar la herramienta no mueve la punta, por construcción.
+  4. p se mide con la CALIBRACIÓN DE PIVOTE [P]: punta quieta sobre la hoja, se inclina la
+     herramienta en todas direcciones y se resuelve R_i p + t_i = q por mínimos cuadrados.
+
+El cordón por defecto es el dibujado en la plantilla (0,0)->(150,0): no hace falta calibrarlo.
+El IMU no es necesario para la posición; si está conectado durante el pivote, se calibra solo
+una fusión que usa su inclinación para reducir el temblor (ver tool_tracking.py).
+
+Controles:
+  [C] Calibrar gyro del MPU-6050 (herramienta quieta)   [T] Tara de yaw
+  [P] Pivote (inicio / fin)                              [ESPACIO]/[F] Cordón propio (opcional)
+  [R] Volver al cordón de la plantilla                   [Q]/[ESC] Salir
+
+Configuración (tool_config.json): "tool_marker_mm" = lado del cuadrado NEGRO del ArUco de la
+herramienta (por defecto 36). Si está mal, el pivote lo corrige.
+Opcional: python tools/calibrar_camara.py -> camera_intrinsics.json (focal + distorsión).
 """
 
 import sys
@@ -28,6 +45,13 @@ try:
 except ImportError:
     HAS_PYSERIAL = False
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from tool_tracking import (TABLE_MARKER_CENTERS_MM, TEMPLATE_SEAM_START_MM, TEMPLATE_SEAM_END_MM,
+                           TOOL_MARKER_ID, DEFAULT_TOOL_MARKER_MM, table_marker_corners_3d,
+                           camera_matrix, estimate_focal, solve_table_pose, marker_candidates,
+                           TablePose, rotation_spread_deg, pivot_calibrate_raw, ImuHistory,
+                           TipTracker)
+
 # ==============================================================================
 # GESTOR HÍBRIDO DE IMU (UDP 4244 O SERIAL DIRECTO SI EL PUENTE NO ESTÁ ACTIVO)
 # ==============================================================================
@@ -40,6 +64,7 @@ imu_state = {
     "source": "",
     "last_time": 0.0
 }
+imu_queue = deque(maxlen=4000)   # (t_recepcion, pitch, roll): todas las lecturas, para la fusión
 ser_direct_conn = None
 stop_serial_thread = threading.Event()
 
@@ -119,6 +144,7 @@ def serial_fallback_worker():
                             imu_state["has_imu"] = True
                             imu_state["source"] = f"USB Directo ({ser_direct_conn.port})"
                             imu_state["last_time"] = time.time()
+                            imu_queue.append((imu_state["last_time"], imu_state["pitch"], imu_state["roll"]))
         except (serial.SerialException, OSError):
             try:
                 ser_direct_conn.close()
@@ -150,111 +176,6 @@ def send_esp32_command(cmd_str, udp_sock, cmd_addr):
         except Exception:
             pass
 
-# ==============================================================================
-# CONFIGURACIÓN FÍSICA DE REFERENCIA (PLANTILLA A4)
-# ==============================================================================
-DEFAULT_SEAM_LENGTH_MM = 150.0 # Longitud objetivo nominal en el simulador
-MARKER_SIZE_MM = 36.0
-HALF_M_MM = MARKER_SIZE_MM / 2.0
-
-MARKER_CENTERS_MM = {
-    1: np.array([-45.0, +65.0], dtype=np.float32),  # Sup Izq
-    2: np.array([+195.0, +65.0], dtype=np.float32), # Sup Der
-    3: np.array([-45.0, -65.0], dtype=np.float32),  # Inf Izq
-    4: np.array([+195.0, -65.0], dtype=np.float32)  # Inf Der
-}
-
-MARKER_CORNERS_PHYSICAL_MM = {}
-for m_id, (cx, cy) in MARKER_CENTERS_MM.items():
-    MARKER_CORNERS_PHYSICAL_MM[m_id] = np.array([
-        [cx - HALF_M_MM, cy + HALF_M_MM],
-        [cx + HALF_M_MM, cy + HALF_M_MM],
-        [cx + HALF_M_MM, cy - HALF_M_MM],
-        [cx - HALF_M_MM, cy - HALF_M_MM]
-    ], dtype=np.float32)
-
-CALIB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mesa_calibration.json")
-
-def load_lever_arm():
-    cfg_candidates = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "tool_config.json"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "simulacion_godot", "trabajo-final-rv", "tool_config.json")
-    ]
-    for cp in cfg_candidates:
-        if os.path.exists(cp):
-            try:
-                with open(cp, "r") as f:
-                    cfg = json.load(f)
-                    if "tool_tip_lever_mm" in cfg:
-                        return float(cfg["tool_tip_lever_mm"])
-            except Exception:
-                pass
-    return 115.0
-
-def load_calibration():
-    if os.path.exists(CALIB_FILE):
-        try:
-            with open(CALIB_FILE, "r") as f:
-                data = json.load(f)
-                start_pt = np.array(data["start_pt"], dtype=np.float32)
-                end_pt = np.array(data["end_pt"], dtype=np.float32)
-                target_len = float(data.get("target_len_mm", DEFAULT_SEAM_LENGTH_MM))
-                ref_pitch = float(data.get("ref_pitch", 0.0))
-                ref_roll = float(data.get("ref_roll", 0.0))
-                lever_mm = float(data.get("tip_lever_mm", 0.0))
-                meas_dist = float(np.linalg.norm(end_pt - start_pt))
-                scale_fac = target_len / meas_dist if meas_dist > 1.0 else 1.0
-                print(f"\n>>> [MEMORIA] Calibracion cargada de mesa_calibration.json:")
-                print(f"    Medida real carton: {meas_dist:.1f} mm -> Sim Godot: {target_len:.0f} mm (Escala: {scale_fac:.2f}x)")
-                return start_pt, end_pt, target_len, ref_pitch, ref_roll, lever_mm
-        except Exception as e:
-            print(f">>> [MEMORIA] Error al leer calibracion: {e}")
-    return None, None, DEFAULT_SEAM_LENGTH_MM, 0.0, 0.0, 0.0
-
-def save_calibration(start_pt, end_pt, target_len, ref_pitch=0.0, ref_roll=0.0, tip_lever_mm=115.0):
-    try:
-        meas_dist = float(np.linalg.norm(end_pt - start_pt))
-        scale_fac = float(target_len / meas_dist) if meas_dist > 1.0 else 1.0
-        data = {
-            "start_pt": [float(start_pt[0]), float(start_pt[1])],
-            "end_pt": [float(end_pt[0]), float(end_pt[1])],
-            "measured_len_mm": round(meas_dist, 2),
-            "target_len_mm": float(target_len),
-            "scale_factor": round(scale_fac, 4),
-            "ref_pitch": round(float(ref_pitch), 2),
-            "ref_roll": round(float(ref_roll), 2),
-            "tip_lever_mm": round(float(tip_lever_mm), 1)
-        }
-        with open(CALIB_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-            
-        # Actualizar también tool_config.json si existe
-        cfg_candidates = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "tool_config.json"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "simulacion_godot", "trabajo-final-rv", "tool_config.json")
-        ]
-        for cp in cfg_candidates:
-            if os.path.exists(cp):
-                try:
-                    with open(cp, "r") as f:
-                        cfg = json.load(f)
-                    cfg["tool_tip_lever_mm"] = round(float(tip_lever_mm), 1)
-                    with open(cp, "w") as f:
-                        json.dump(cfg, f, indent=2)
-                except Exception:
-                    pass
-                    
-        print(f"\n============================================================")
-        print(f"  ¡CALIBRACION 1:1 GUARDADA EXITOSAMENTE EN DISCO!")
-        print(f"============================================================")
-        print(f"  - Longitud en tu cartón físico: {meas_dist:.1f} mm")
-        print(f"  - Longitud en el simulador:     {target_len:.0f} mm")
-        print(f"  - Factor de escala aplicado:    {scale_fac:.2f}x")
-        print(f"  - Brazo palanca cinemático L:   {tip_lever_mm:.0f} mm")
-        print(f"  - Inclinación de referencia:    Pitch {ref_pitch:.1f}°, Roll {ref_roll:.1f}°")
-        print(f"============================================================\n")
-    except Exception as e:
-        print(f">>> [MEMORIA] Error guardando calibracion: {e}")
 
 def find_camera():
     print("Buscando camara web...")
@@ -274,6 +195,172 @@ def find_camera():
             cap.release()
     return None
 
+
+# ==============================================================================
+# ARCHIVOS Y CONFIGURACIÓN
+# ==============================================================================
+TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
+CALIB_FILE = os.path.join(TOOLS_DIR, "mesa_calibration.json")
+INTRINSICS_FILE = os.path.join(TOOLS_DIR, "camera_intrinsics.json")
+CFG_CANDIDATES = [
+    os.path.join(TOOLS_DIR, "tool_config.json"),
+    os.path.join(TOOLS_DIR, "..", "simulacion_godot", "trabajo-final-rv", "tool_config.json"),
+]
+CALIB_VERSION = 4   # v4: seguimiento 6D + pivote (offset de la punta en el sistema del marcador)
+DEFAULT_SEAM_LENGTH_MM = 150.0
+GODOT_UDP_ADDR = ("127.0.0.1", 4242)
+COMMAND_UDP_ADDR = ("127.0.0.1", 4243)
+
+
+def load_tool_config():
+    for cp in CFG_CANDIDATES:
+        if os.path.exists(cp):
+            try:
+                with open(cp, "r") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+    return {}
+
+
+def update_tool_config(values):
+    for cp in CFG_CANDIDATES:
+        if os.path.exists(cp):
+            try:
+                with open(cp, "r") as f:
+                    cfg = json.load(f)
+                cfg.update(values)
+                with open(cp, "w") as f:
+                    json.dump(cfg, f, indent=2)
+            except Exception:
+                pass
+
+
+def load_intrinsics(width, height):
+    """camera_intrinsics.json (de calibrar_camara.py). Devuelve (K, dist) o (None, None)."""
+    if not os.path.exists(INTRINSICS_FILE):
+        return None, None
+    try:
+        with open(INTRINSICS_FILE, "r") as f:
+            d = json.load(f)
+        K = np.array(d["K"], np.float64).reshape(3, 3)
+        dist = np.array(d["dist"], np.float64).ravel()
+        w0, h0 = int(d["width"]), int(d["height"])
+        if (w0, h0) != (width, height):
+            if abs(w0 / h0 - width / height) > 0.01:
+                print(f">>> [CAMARA] camera_intrinsics.json es de {w0}x{h0} y la camara da {width}x{height}: se ignora.")
+                return None, None
+            sc = width / w0
+            K = K.copy()
+            K[:2] *= sc
+        return K, dist
+    except Exception as e:
+        print(f">>> [CAMARA] Error leyendo camera_intrinsics.json: {e}")
+        return None, None
+
+
+def default_calibration():
+    return {"p_tip": None, "marker_mm_eff": None, "pivot_rms_mm": None, "focal_px": None,
+            "image_size": None, "imu": None,
+            "seam_start": np.array(TEMPLATE_SEAM_START_MM, np.float64),
+            "seam_end": np.array(TEMPLATE_SEAM_END_MM, np.float64),
+            "seam_custom": False, "target_len": DEFAULT_SEAM_LENGTH_MM}
+
+
+def load_calibration():
+    cal = default_calibration()
+    if not os.path.exists(CALIB_FILE):
+        return cal
+    try:
+        with open(CALIB_FILE, "r") as f:
+            d = json.load(f)
+        ver = int(d.get("version", 1))
+        if ver < CALIB_VERSION:
+            bak = CALIB_FILE + f".v{ver}.bak"
+            try:
+                os.replace(CALIB_FILE, bak)
+            except Exception:
+                pass
+            print(f"\n>>> [MEMORIA] mesa_calibration.json es de un metodo anterior (v{ver}). Se guardo como")
+            print(f"    {os.path.basename(bak)} y se empieza de cero: haz el pivote con [P].")
+            return cal
+        cal["target_len"] = float(d.get("target_len_mm", DEFAULT_SEAM_LENGTH_MM))
+        if d.get("tool_tip_offset_mm") is not None:
+            cal["p_tip"] = np.array(d["tool_tip_offset_mm"], np.float64)
+            cal["marker_mm_eff"] = float(d["tool_marker_mm_eff"])
+            cal["pivot_rms_mm"] = d.get("pivot_rms_mm")
+        if d.get("camera_focal_px") is not None:
+            cal["focal_px"] = float(d["camera_focal_px"])
+            cal["image_size"] = tuple(d.get("image_size", (0, 0)))
+        if d.get("imu_fusion"):
+            fu = d["imu_fusion"]
+            cal["imu"] = {"enabled": True, "Q": np.array(fu["Q"], np.float64).reshape(3, 3),
+                          "delay_s": float(fu["delay_s"]), "p_tip": np.array(fu["p_tip"], np.float64),
+                          "resid_deg": float(fu.get("resid_deg", 0.0))}
+        if d.get("seam_custom") and d.get("start_pt") is not None and d.get("end_pt") is not None:
+            cal["seam_start"] = np.array(d["start_pt"], np.float64)
+            cal["seam_end"] = np.array(d["end_pt"], np.float64)
+            cal["seam_custom"] = True
+    except Exception as e:
+        print(f">>> [MEMORIA] Error al leer calibracion: {e}")
+    return cal
+
+
+def save_calibration(cal):
+    try:
+        meas = float(np.linalg.norm(cal["seam_end"] - cal["seam_start"]))
+        d = {
+            "version": CALIB_VERSION,
+            "metodo": "pose 6D del ArUco + calibracion de pivote",
+            "target_len_mm": float(cal["target_len"]),
+            "seam_custom": bool(cal["seam_custom"]),
+            "start_pt": [float(v) for v in cal["seam_start"]],
+            "end_pt": [float(v) for v in cal["seam_end"]],
+            "measured_len_mm": round(meas, 2),
+            "scale_factor": round(float(cal["target_len"] / meas) if meas > 1 else 1.0, 4),
+            "tool_tip_offset_mm": None if cal["p_tip"] is None else [round(float(v), 3) for v in cal["p_tip"]],
+            "tool_marker_mm_eff": None if cal["marker_mm_eff"] is None else round(float(cal["marker_mm_eff"]), 3),
+            "pivot_rms_mm": None if cal["pivot_rms_mm"] is None else round(float(cal["pivot_rms_mm"]), 3),
+            "camera_focal_px": None if cal["focal_px"] is None else round(float(cal["focal_px"]), 1),
+            "image_size": None if cal["image_size"] is None else list(cal["image_size"]),
+            "imu_fusion": None,
+        }
+        fu = cal.get("imu")
+        if fu and fu.get("enabled"):
+            d["imu_fusion"] = {"Q": [[float(v) for v in row] for row in fu["Q"]],
+                               "delay_s": round(float(fu["delay_s"]), 3),
+                               "p_tip": [round(float(v), 3) for v in fu["p_tip"]],
+                               "resid_deg": round(float(fu["resid_deg"]), 2)}
+        with open(CALIB_FILE, "w") as f:
+            json.dump(d, f, indent=2)
+        if cal["p_tip"] is not None:
+            # Informativo para Godot (distancia punta-marcador)
+            update_tool_config({"tool_tip_lever_mm": round(float(np.linalg.norm(cal["p_tip"])), 1)})
+    except Exception as e:
+        print(f">>> [MEMORIA] Error guardando calibracion: {e}")
+
+
+def seam_coords(tip_xy, cal):
+    """Punto de la mesa [mm] -> (avance, desvío) en mm del simulador (cordón = target_len)."""
+    s0, s1 = cal["seam_start"], cal["seam_end"]
+    v = s1 - s0
+    L = float(np.linalg.norm(v))
+    if L < 10.0:
+        return float(tip_xy[0] - s0[0]), float(tip_xy[1] - s0[1])
+    u = v / L
+    n = np.array([-u[1], u[0]])
+    d = np.asarray(tip_xy, np.float64) - s0
+    k = cal["target_len"] / L
+    return float(d @ u) * k, float(d @ n) * k
+
+
+def put(frame, text, org, scale=0.46, color=(220, 225, 235), thick=1):
+    cv2.putText(frame, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thick, cv2.LINE_AA)
+
+
+# ==============================================================================
+# PROGRAMA PRINCIPAL
+# ==============================================================================
 def main():
     cap = find_camera()
     if cap is None:
@@ -284,6 +371,11 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_FPS, 30)
+    ret, frame = cap.read()
+    if not ret or frame is None:
+        print("\n>>> ERROR: la camara no entrega imagen.")
+        sys.exit(1)
+    fh, fw = frame.shape[:2]
 
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     detector_params = cv2.aruco.DetectorParameters()
@@ -293,32 +385,54 @@ def main():
     detector_params.cornerRefinementMinAccuracy = 0.05
     detector = cv2.aruco.ArucoDetector(aruco_dict, detector_params)
 
+    cfg = load_tool_config()
+    marker_cfg_mm = float(cfg.get("tool_marker_mm", DEFAULT_TOOL_MARKER_MM))
+    cal = load_calibration()
+
     print("\n============================================================")
-    print("  ArcSim_VR - Seguimiento en Mesa de Soldadura (v3 Calibrada)")
+    print("  ArcSim_VR - Seguimiento en Mesa (v4: pose 6D + pivote)")
     print("============================================================")
-    print("Calibración del cordón en 2 pasos:")
-    print("  1. Apoya la punta en el INICIO y presiona [ESPACIO]")
-    print("  2. Apoya la punta en el FINAL  y presiona [F]")
-    print("Controles:")
-    print("  [ESPACIO]       : Calibrar INICIO (0,0)")
-    print("  [F]             : Calibrar FINAL del cordón (Auto-escala 150mm)")
-    print("  [T]             : TARA YAW (Alinear rumbo longitudinal del cordón a 0°)")
-    print("  [C]             : CALIBRAR GYRO MPU-6050 (¡Herramienta INMÓVIL sobre la mesa!)")
-    print("  [ [ / ] ]       : Ajustar longitud del brazo de palanca L (±5mm)")
-    print("  [R]             : Resetear calibración")
-    print("  [Q] o [ESC]     : Salir")
+    print("  [C] Calibrar gyro (herramienta QUIETA)   [T] Tara yaw")
+    print("  [P] PIVOTE: punta apoyada y QUIETA en la hoja, inclinar en")
+    print("      avance y lateral 5-10 s, [P] otra vez para calcular")
+    print("  [ESPACIO]/[F] Cordon propio (opcional; por defecto el de la plantilla)")
+    print("  [R] Volver al cordon de la plantilla     [Q]/[ESC] Salir")
     print("============================================================\n")
 
-    # Variables de homografía y posición
-    smoothed_H = None
-    smoothed_tool_mm = None
-    
-    # Cargar calibración persistente y brazo cinemático si existen previamente
-    calib_start_pt, calib_end_pt, seam_len_target_mm, calib_ref_pitch, calib_ref_roll, saved_lever_mm = load_calibration()
-    tip_lever_mm = saved_lever_mm if saved_lever_mm > 10.0 else load_lever_arm()
-    calib_scale_factor = 1.0
+    # --- Intrínsecos de la cámara ---------------------------------------------
+    K, dist = load_intrinsics(fw, fh)
+    if K is not None:
+        cam_src = "calibrada (camera_intrinsics.json)"
+        K_reliable = True
+    elif cal["focal_px"] is not None and cal["image_size"] and tuple(cal["image_size"]) == (fw, fh):
+        K, dist = camera_matrix(cal["focal_px"], fw, fh), np.zeros(5)
+        cam_src = "guardada del pivote"
+        K_reliable = True
+    else:
+        K, dist = None, np.zeros(5)
+        cam_src = "estimando con la plantilla..."
+        K_reliable = False
+    focal_views_img, focal_views_obj = [], []
+    frames_without_focal = 0
 
-    # Socket UDP para recibir telemetría del IMU (puerto 4244 desde serial_bridge)
+    if cal["p_tip"] is not None:
+        print(f">>> [MEMORIA] Pivote cargado: punta a {np.linalg.norm(cal['p_tip']):.0f} mm del marcador"
+              f" (residuo {cal['pivot_rms_mm'] or 0:.1f} mm)"
+              + (", fusion con IMU activa" if cal["imu"] else ""))
+    else:
+        print(">>> Falta la calibracion de pivote: apoya la punta en la hoja y usa [P].")
+    print(f">>> Cordon: {'propio (ESPACIO/F)' if cal['seam_custom'] else 'el de la plantilla (0 a 150 mm)'}")
+
+    def make_tracker():
+        if cal["p_tip"] is None:
+            return None
+        fu = cal["imu"]
+        return TipTracker(cal["p_tip"], fu["p_tip"] if fu else None)
+
+    tracker = make_tracker()
+    imu_hist = ImuHistory(seconds=60.0)
+
+    # --- Sockets ----------------------------------------------------------------
     imu_rx_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     imu_rx_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
@@ -326,515 +440,425 @@ def main():
         imu_rx_sock.setblocking(False)
     except Exception:
         pass
-
-    latest_pitch = 0.0
-    latest_roll = 0.0
-    latest_yaw = 0.0
-    has_imu = False
-
-    # Socket UDP para enviar seguimiento 1:1 a Godot y comandos al ESP32
-    GODOT_UDP_ADDR = ("127.0.0.1", 4242)
-    COMMAND_UDP_ADDR = ("127.0.0.1", 4243)
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     last_sent_pos = None
     last_udp_time = 0.0
 
-    cmd_status_msg = ""
-    cmd_status_timer = 0.0
-    cmd_status_color = (0, 255, 0)
-    imu_source_str = "Buscando..."
-
-    # Iniciar hilo de lectura serial autónoma en segundo plano
     serial_th = threading.Thread(target=serial_fallback_worker, daemon=True)
     serial_th.start()
 
-    history = deque(maxlen=20)
+    # --- Estado ----------------------------------------------------------------
+    table_rvec = table_tvec = None
+    table_pose = None
+    ref_table_img = ref_table_obj = None     # vista de la mesa con más puntos (para el pivote)
+    pivot_active = False
+    pivot_corners, pivot_times, pivot_Rs = [], [], []
+    pivot_spread = (0.0, 0.0)
+    cmd_msg, cmd_timer, cmd_color = "", 0.0, (0, 255, 0)
+    history = deque(maxlen=30)
     speed_filtered = 0.0
+    fps_count, fps_start, current_fps = 0, time.time(), 0.0
+    tip3 = None
+    pending_seam_start = None
+    last_mute_sent = 0.0
 
-    fps_count = 0
-    fps_start = time.time()
-    current_fps = 0.0
+    def status(msg, color=(0, 255, 0), secs=3.0):
+        nonlocal cmd_msg, cmd_timer, cmd_color
+        cmd_msg, cmd_color, cmd_timer = msg, color, time.time() + secs
 
     while True:
         ret, frame = cap.read()
         if not ret or frame is None:
             break
-
         now = time.time()
         fps_count += 1
         if now - fps_start >= 1.0:
             current_fps = fps_count / (now - fps_start)
-            fps_count = 0
-            fps_start = now
+            fps_count, fps_start = 0, now
 
+        # ------------------------------------------------------------------
+        # DETECCIÓN
+        # ------------------------------------------------------------------
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        corners, ids, rejected = detector.detectMarkers(gray)
-
-        table_corners_img = []
-        table_corners_real = []
-        visible_table_ids = []
-        pos_tool_px = None
-
-        if ids is not None and len(ids) > 0:
-            ids_flat = ids.flatten()
-            for i, marker_id in enumerate(ids_flat):
-                c = corners[i][0]
-
-                if marker_id in MARKER_CORNERS_PHYSICAL_MM:
-                    for k in range(4):
-                        table_corners_img.append([float(c[k, 0]), float(c[k, 1])])
-                        table_corners_real.append(MARKER_CORNERS_PHYSICAL_MM[marker_id][k])
-
-                    visible_table_ids.append(marker_id)
+        corners, ids, _ = detector.detectMarkers(gray)
+        t_img, t_obj, visible_table_ids = [], [], []
+        tool_corners = None
+        if ids is not None:
+            for i, mid in enumerate(ids.flatten()):
+                c = corners[i][0].astype(np.float64)
+                if int(mid) in TABLE_MARKER_CENTERS_MM:
+                    t_img.append(c)
+                    t_obj.append(table_marker_corners_3d(int(mid)))
+                    visible_table_ids.append(int(mid))
                     cv2.polylines(frame, [c.astype(np.int32)], True, (0, 255, 0), 2)
-                    cx = int(np.mean(c[:, 0]))
-                    cy = int(np.mean(c[:, 1]))
-                    cv2.circle(frame, (cx, cy), 4, (0, 255, 0), -1)
-                    cv2.putText(frame, f"ID {marker_id}", (cx - 15, cy - 12),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
-
-                elif marker_id == 0:
-                    cx = float(np.mean(c[:, 0]))
-                    cy = float(np.mean(c[:, 1]))
-                    pos_tool_px = np.array([cx, cy], dtype=np.float32)
+                    put(frame, f"ID {mid}", (int(c[:, 0].mean()) - 15, int(c[:, 1].mean()) - 10), 0.45, (0, 255, 0))
+                elif int(mid) == TOOL_MARKER_ID:
+                    tool_corners = c
                     cv2.polylines(frame, [c.astype(np.int32)], True, (255, 255, 0), 2)
-                    cv2.circle(frame, (int(cx), int(cy)), 5, (255, 255, 0), -1)
-                    cv2.putText(frame, "HERRAMIENTA (ID 0)", (int(cx) - 60, int(cy) - 20),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
+        if t_img:
+            t_img = np.vstack(t_img)
+            t_obj = np.vstack(t_obj)
 
-        # ----------------------------------------------------------------------
-        # LECTURA DE TELEMETRÍA IMU (PUENTE UDP 4244 O SERIAL DIRECTO)
-        # ----------------------------------------------------------------------
+        # ------------------------------------------------------------------
+        # IMU (solo para la fusión opcional y para mostrar; [C] y [T] no cambian)
+        # ------------------------------------------------------------------
         try:
             while True:
                 data, _ = imu_rx_sock.recvfrom(1024)
                 d = json.loads(data.decode("utf-8", "ignore"))
                 if "p" in d and "r" in d:
+                    tr = time.time()
                     with imu_lock:
                         imu_state["pitch"] = float(d["p"])
                         imu_state["roll"] = float(d["r"])
                         imu_state["yaw"] = float(d.get("y", 0.0))
                         imu_state["has_imu"] = True
                         imu_state["source"] = "UDP 4244 (Puente)"
-                        imu_state["last_time"] = time.time()
+                        imu_state["last_time"] = tr
+                    imu_queue.append((tr, float(d["p"]), float(d["r"])))
         except Exception:
             pass
-
+        while imu_queue:
+            tq, pq, rq = imu_queue.popleft()
+            imu_hist.add(tq, pq, rq)
         with imu_lock:
-            latest_pitch = imu_state["pitch"]
-            latest_roll = imu_state["roll"]
-            latest_yaw = imu_state["yaw"]
-            has_imu = imu_state["has_imu"] and (time.time() - imu_state["last_time"] < 3.0)
+            latest_pitch, latest_roll = imu_state["pitch"], imu_state["roll"]
+            has_imu = imu_state["has_imu"] and (time.time() - imu_state["last_time"] < 0.5)
             imu_source_str = imu_state["source"]
 
-        # ----------------------------------------------------------------------
-        # CÁLCULO DE LA HOMOGRAFÍA DE LA MESA
-        # ----------------------------------------------------------------------
-        if len(table_corners_img) >= 4:
-            pts_img = np.array(table_corners_img, dtype=np.float32)
-            pts_real = np.array(table_corners_real, dtype=np.float32)
-            H_measured, _ = cv2.findHomography(pts_img, pts_real, cv2.RANSAC, 4.0)
+        # ------------------------------------------------------------------
+        # CÁMARA: focal (si no está calibrada) y pose de la mesa
+        # ------------------------------------------------------------------
+        if K is None:
+            if len(visible_table_ids) >= 3:
+                focal_views_img.append(t_img.copy())
+                focal_views_obj.append(t_obj.copy())
+            frames_without_focal += 1
+            if len(focal_views_img) >= 15:
+                f_est = estimate_focal(focal_views_img[-15:], focal_views_obj[-15:], fw, fh)
+                if f_est is not None:
+                    K = camera_matrix(f_est, fw, fh)
+                    cam_src = "estimada de la plantilla"
+                    K_reliable = True
+                    print(f">>> [CAMARA] Focal estimada con la plantilla: {f_est:.0f} px")
+                elif len(focal_views_img) >= 45:
+                    K = camera_matrix(0.8 * fw, fw, fh)
+                    cam_src = "aproximada (se ajusta en el pivote)"
+                    K_reliable = False
+                    print(">>> [CAMARA] No se pudo estimar la focal (plantilla muy de frente?). Se usa una")
+                    print("    aproximada y se ajusta en el pivote. Mejor: python tools/calibrar_camara.py")
 
-            if H_measured is not None:
-                if abs(H_measured[2, 2]) > 1e-6:
-                    H_measured /= H_measured[2, 2]
-                if smoothed_H is None:
-                    smoothed_H = H_measured.copy()
+        if K is not None and len(visible_table_ids) >= 2:
+            tp = solve_table_pose(t_img, t_obj, K, dist)
+            if tp is not None:
+                rv = cv2.Rodrigues(tp[0])[0].ravel()
+                tv = tp[1]
+                if table_rvec is None or np.linalg.norm(tv - table_tvec) > 15.0 or \
+                        np.linalg.norm(rv - table_rvec) > 0.05:
+                    table_rvec, table_tvec = rv, tv            # primera vez o la cámara se movió
                 else:
-                    smoothed_H = 0.90 * smoothed_H + 0.10 * H_measured
+                    table_rvec = 0.9 * table_rvec + 0.1 * rv  # mesa y cámara fijas: promedio
+                    table_tvec = 0.9 * table_tvec + 0.1 * tv
+                table_pose = TablePose(cv2.Rodrigues(table_rvec)[0], table_tvec)
+                if ref_table_img is None or len(t_img) >= len(ref_table_img):
+                    ref_table_img, ref_table_obj = t_img.copy(), t_obj.copy()
 
-        # Proyectar la posición del marcador de la herramienta al plano de la mesa
-        raw_tool_table_mm = None
-        if smoothed_H is not None and pos_tool_px is not None:
-            tool_homogeneous = np.array([pos_tool_px[0], pos_tool_px[1], 1.0], dtype=np.float32)
-            transformed = smoothed_H @ tool_homogeneous
-            if abs(transformed[2]) > 1e-6:
-                raw_tool_table_mm = np.array([transformed[0] / transformed[2],
-                                              transformed[1] / transformed[2]], dtype=np.float32)
+        # Plantilla y cordón proyectados (verificación visual del modelo de cámara)
+        if table_pose is not None:
+            sp = table_pose.project(np.array([[*cal["seam_start"], 0], [*cal["seam_end"], 0]]), K, dist)
+            cv2.line(frame, tuple(sp[0].astype(int)), tuple(sp[1].astype(int)), (255, 140, 0), 2, cv2.LINE_AA)
+            cv2.circle(frame, tuple(sp[0].astype(int)), 5, (0, 255, 0), -1)
+            cv2.circle(frame, tuple(sp[1].astype(int)), 5, (0, 0, 255), -1)
 
-                if smoothed_tool_mm is None:
-                    smoothed_tool_mm = raw_tool_table_mm.copy()
-                else:
-                    smoothed_tool_mm = 0.80 * smoothed_tool_mm + 0.20 * raw_tool_table_mm
+        # ------------------------------------------------------------------
+        # POSE 6D DE LA HERRAMIENTA Y PUNTA
+        # ------------------------------------------------------------------
+        cands_cam, cands_tab = [], []
+        if table_pose is not None and tool_corners is not None:
+            m_mm = cal["marker_mm_eff"] if cal["marker_mm_eff"] else marker_cfg_mm
+            cands_cam = marker_candidates(tool_corners, m_mm, K, dist)
+            cands_tab = table_pose.candidates_in_table(cands_cam)
 
-        # ----------------------------------------------------------------------
-        # CALCULO DE LA POSICIÓN RELATIVA DE LA PUNTA (AVANCE Y DESVÍO)
-        # ----------------------------------------------------------------------
+        n_imu = None
+        fu = cal["imu"]
+        if fu and fu.get("enabled") and has_imu:
+            u = imu_hist.at(now - fu["delay_s"])
+            if u is not None:
+                n_imu = fu["Q"] @ u
+
+        idx = None
+        if tracker is not None and cands_tab:
+            tip3, _, idx = tracker.update(cands_tab, now, n_imu)
+        elif tracker is not None and tool_corners is None:
+            tip3 = None
+            tracker.reset()
+
+        if idx is not None and cands_cam:
+            Rc, tc, _ = cands_cam[idx]
+            cv2.drawFrameAxes(frame, K, dist, cv2.Rodrigues(Rc)[0], tc, 20.0, 2)
+
+        # Grabación del pivote
+        # Motor en silencio mientras se graba el pivote (se renueva cada 0,25 s)
+        if pivot_active and now - last_mute_sent >= 0.25:
+            send_esp32_command('{"cmd":"HAPTIC_MUTE","ms":800}\n', udp_sock, COMMAND_UDP_ADDR)
+            last_mute_sent = now
+        if pivot_active and cands_tab:
+            pivot_corners.append(tool_corners.copy())
+            pivot_times.append(now)
+            pivot_Rs.append(min(cands_tab, key=lambda c: c[2])[0])
+            if len(pivot_Rs) >= 10 and len(pivot_Rs) % 5 == 0:
+                sp_deg, _ = rotation_spread_deg(pivot_Rs)
+                pivot_spread = (float(sp_deg[0]), float(sp_deg[1]))
+
+        # ------------------------------------------------------------------
+        # COORDENADAS DEL CORDÓN, ENVÍO A GODOT Y VELOCIDAD
+        # ------------------------------------------------------------------
         tip_pos_mm = None
-        pos_x = 0.0
-        pos_y = 0.0
+        pos_x = pos_y = 0.0
+        if tip3 is not None:
+            pos_x, pos_y = seam_coords(tip3[:2], cal)
+            tip_pos_mm = np.array([pos_x, pos_y])
 
-        if smoothed_tool_mm is not None:
-            if calib_start_pt is not None:
-                # Vector desde el punto de inicio calibrado
-                delta = smoothed_tool_mm - calib_start_pt
-
-                if calib_end_pt is not None:
-                    # Si ambos puntos fueron calibrados (Inicio y Fin):
-                    seam_vec = calib_end_pt - calib_start_pt
-                    seam_measured_len = float(np.linalg.norm(seam_vec))
-                    if seam_measured_len > 10.0:
-                        u_dir = seam_vec / seam_measured_len
-                        v_dir = np.array([-u_dir[1], u_dir[0]], dtype=np.float32)
-                        
-                        # Proyección a lo largo del cordón y desvío lateral
-                        dist_along = float(np.dot(delta, u_dir))
-                        dist_perp  = float(np.dot(delta, v_dir))
-
-                        # Escalar exactamente a la longitud del cordón de Godot (150 mm)
-                        pos_x = dist_along * (seam_len_target_mm / seam_measured_len)
-                        pos_y = dist_perp  * (seam_len_target_mm / seam_measured_len)
-                        tip_pos_mm = np.array([pos_x, pos_y], dtype=np.float32)
-                else:
-                    # Solo inicio calibrado
-                    pos_x = delta[0] * calib_scale_factor
-                    pos_y = delta[1] * calib_scale_factor
-                    tip_pos_mm = np.array([pos_x, pos_y], dtype=np.float32)
-            else:
-                # Sin calibrar (muestra la posición cruda del marcador)
-                pos_x = smoothed_tool_mm[0]
-                pos_y = smoothed_tool_mm[1]
-                tip_pos_mm = smoothed_tool_mm
-
-        raw_pos_x = pos_x
-        raw_pos_y = pos_y
-        lever_dx = 0.0
-        lever_dy = 0.0
-
-        # COMPENSACIÓN CINEMÁTICA 3D DE LA PUNTA:
-        # Desacopla la inclinación: al cambiar pitch o roll, la punta de apoyo permanece inmóvil
-        if has_imu and calib_start_pt is not None:
-            d_pitch_rad = math.radians(latest_pitch - calib_ref_pitch)
-            d_roll_rad = math.radians(latest_roll - calib_ref_roll)
-            lever_dx = tip_lever_mm * math.sin(d_pitch_rad)
-            lever_dy = tip_lever_mm * math.sin(d_roll_rad)
-            pos_x = raw_pos_x - lever_dx
-            pos_y = raw_pos_y - lever_dy
-            tip_pos_mm = np.array([pos_x, pos_y], dtype=np.float32)
-
-        # Proyección inversa de la punta corregida a píxeles de la cámara en vivo
-        tip_cam_px = None
-        if smoothed_H is not None and smoothed_tool_mm is not None:
-            try:
-                if calib_start_pt is not None and calib_end_pt is not None:
-                    seam_vec = calib_end_pt - calib_start_pt
-                    seam_len = float(np.linalg.norm(seam_vec))
-                    if seam_len > 10.0:
-                        u_dir = seam_vec / seam_len
-                        v_dir = np.array([-u_dir[1], u_dir[0]], dtype=np.float32)
-                        ratio = seam_len / seam_len_target_mm
-                        tip_table_mm = calib_start_pt + (pos_x * ratio) * u_dir + (pos_y * ratio) * v_dir
-                    else:
-                        tip_table_mm = smoothed_tool_mm - np.array([lever_dx, lever_dy], dtype=np.float32)
-                else:
-                    tip_table_mm = smoothed_tool_mm - np.array([lever_dx, lever_dy], dtype=np.float32)
-
-                inv_H = np.linalg.inv(smoothed_H)
-                tip_h = inv_H @ np.array([tip_table_mm[0], tip_table_mm[1], 1.0], dtype=np.float32)
-                if abs(tip_h[2]) > 1e-6:
-                    tip_cam_px = (int(round(tip_h[0] / tip_h[2])), int(round(tip_h[1] / tip_h[2])))
-            except Exception:
-                tip_cam_px = None
-
-        # Dibujar visualización sobre la imagen en vivo de la cámara
-        if pos_tool_px is not None:
-            m_cx, m_cy = int(pos_tool_px[0]), int(pos_tool_px[1])
-            cv2.circle(frame, (m_cx, m_cy), 6, (0, 165, 255), -1)
-            cv2.putText(frame, "Marcador (Bruto)", (m_cx - 50, m_cy - 18),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 165, 255), 2)
-
-        if tip_cam_px is not None:
-            t_cx, t_cy = tip_cam_px
-            if 0 <= t_cx < frame.shape[1] and 0 <= t_cy < frame.shape[0]:
-                if pos_tool_px is not None:
-                    cv2.line(frame, (int(pos_tool_px[0]), int(pos_tool_px[1])), (t_cx, t_cy), (0, 220, 255), 2)
-                # Cruceta y aro verde en la punta física calculada
-                cv2.circle(frame, (t_cx, t_cy), 6, (0, 255, 0), -1)
-                cv2.circle(frame, (t_cx, t_cy), 13, (0, 255, 0), 2)
-                cv2.line(frame, (t_cx - 15, t_cy), (t_cx + 15, t_cy), (0, 255, 0), 2)
-                cv2.line(frame, (t_cx, t_cy - 15), (t_cx, t_cy + 15), (0, 255, 0), 2)
-                cv2.putText(frame, "PUNTA CORREGIDA", (t_cx + 16, t_cy + 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.46, (0, 255, 0), 2)
-
-        # ----------------------------------------------------------------------
-        # TRANSMISIÓN UDP A GODOT (dx, dy, x, y absoluto)
-        # ----------------------------------------------------------------------
-        if tip_pos_mm is not None and calib_start_pt is not None:
+        if tip_pos_mm is not None:
             if last_sent_pos is None:
-                last_sent_pos = np.array([pos_x, pos_y], dtype=np.float32)
-            dx = pos_x - last_sent_pos[0]
-            dy = pos_y - last_sent_pos[1]
-            now_t = time.time()
-
-            # Transmitir si hay movimiento >= 0.15 mm O de forma periódica a 25 Hz (cada 40 ms)
-            if abs(dx) >= 0.15 or abs(dy) >= 0.15 or (now_t - last_udp_time >= 0.04):
-                pkt = {
-                    "dx": round(float(dx), 2),
-                    "dy": round(float(dy), 2),
-                    "x": round(float(pos_x), 2),
-                    "y": round(float(pos_y), 2)
-                }
+                last_sent_pos = tip_pos_mm.copy()
+            dx, dy = pos_x - last_sent_pos[0], pos_y - last_sent_pos[1]
+            if abs(dx) >= 0.15 or abs(dy) >= 0.15 or (now - last_udp_time >= 0.04):
+                pkt = {"dx": round(float(dx), 2), "dy": round(float(dy), 2),
+                       "x": round(float(pos_x), 2), "y": round(float(pos_y), 2)}
                 try:
                     udp_sock.sendto(json.dumps(pkt).encode("ascii"), GODOT_UDP_ADDR)
                 except Exception:
                     pass
-                last_sent_pos = np.array([pos_x, pos_y], dtype=np.float32)
-                last_udp_time = now_t
+                last_sent_pos = tip_pos_mm.copy()
+                last_udp_time = now
         else:
             last_sent_pos = None
 
-        # ----------------------------------------------------------------------
-        # VELOCIDAD DE AVANCE
-        # ----------------------------------------------------------------------
         if tip_pos_mm is not None:
-            history.append((now, tip_pos_mm[0], tip_pos_mm[1]))
+            history.append((now, pos_x, pos_y))
             ref_idx = 0
-            for k in range(len(history)):
-                if now - history[k][0] >= 0.25:
-                    ref_idx = k
+            for k_ in range(len(history)):
+                if now - history[k_][0] >= 0.25:
+                    ref_idx = k_
                 else:
                     break
-
             t_old, x_old, y_old = history[ref_idx]
             dt_win = now - t_old
             if dt_win >= 0.10:
-                dist_moved = math.hypot(tip_pos_mm[0] - x_old, tip_pos_mm[1] - y_old)
-                if dist_moved < 0.45:
-                    v_target = 0.0
-                else:
-                    v_target = min(dist_moved / dt_win, 25.0)
-
+                dist_moved = math.hypot(pos_x - x_old, pos_y - y_old)
+                v_target = 0.0 if dist_moved < 0.45 else min(dist_moved / dt_win, 25.0)
                 if v_target == 0.0:
-                    speed_filtered *= 0.50
-                    if speed_filtered < 0.1: speed_filtered = 0.0
+                    speed_filtered *= 0.5
+                    if speed_filtered < 0.1:
+                        speed_filtered = 0.0
                 else:
-                    speed_filtered = 0.70 * speed_filtered + 0.30 * v_target
+                    speed_filtered = 0.7 * speed_filtered + 0.3 * v_target
         else:
             history.clear()
-            speed_filtered *= 0.50
-            if speed_filtered < 0.1: speed_filtered = 0.0
+            speed_filtered *= 0.5
+            if speed_filtered < 0.1:
+                speed_filtered = 0.0
 
-        # ----------------------------------------------------------------------
-        # MINIMAPA 2D (ESQUINA SUPERIOR DERECHA)
-        # ----------------------------------------------------------------------
-        mm_w, mm_h = 360, 180
-        mm_x0, mm_y0 = frame.shape[1] - mm_w - 20, 20
+        # ------------------------------------------------------------------
+        # DIBUJO
+        # ------------------------------------------------------------------
+        if tip3 is not None and table_pose is not None:
+            tp_px = table_pose.project(tip3, K, dist)[0]
+            tx, ty = int(round(tp_px[0])), int(round(tp_px[1]))
+            if 0 <= tx < fw and 0 <= ty < fh:
+                if tool_corners is not None:
+                    mc = tool_corners.mean(axis=0)
+                    cv2.line(frame, (int(mc[0]), int(mc[1])), (tx, ty), (0, 220, 255), 1, cv2.LINE_AA)
+                cv2.circle(frame, (tx, ty), 5, (0, 255, 0), -1)
+                cv2.circle(frame, (tx, ty), 12, (0, 255, 0), 2)
+                cv2.line(frame, (tx - 16, ty), (tx + 16, ty), (0, 255, 0), 2)
+                cv2.line(frame, (tx, ty - 16), (tx, ty + 16), (0, 255, 0), 2)
+                put(frame, f"PUNTA  z={tip3[2]:+.0f} mm", (tx + 16, ty + 5), 0.5, (0, 255, 0), 2)
+
+        # Minimapa
+        mm_w, mm_h = 360, 150
+        mm_x0, mm_y0 = fw - mm_w - 20, 20
         cv2.rectangle(frame, (mm_x0, mm_y0), (mm_x0 + mm_w, mm_y0 + mm_h), (25, 30, 38), -1)
         cv2.rectangle(frame, (mm_x0, mm_y0), (mm_x0 + mm_w, mm_y0 + mm_h), (80, 95, 120), 1)
-
-        cv2.putText(frame, "MINIMAPA DEL CORDÓN (150 mm)", (mm_x0 + 15, mm_y0 + 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 220, 240), 1)
-
-        map_origin_x = mm_x0 + 40
-        map_origin_y = mm_y0 + mm_h // 2 - 8
-        map_scale = 1.5
-
-        seam_len_px = int(seam_len_target_mm * map_scale)
-        cv2.rectangle(frame, (map_origin_x, map_origin_y - 12),
-                             (map_origin_x + seam_len_px, map_origin_y + 12), (50, 60, 75), -1)
-        cv2.line(frame, (map_origin_x, map_origin_y),
-                        (map_origin_x + seam_len_px, map_origin_y), (100, 140, 180), 2)
-        cv2.circle(frame, (map_origin_x, map_origin_y), 5, (0, 255, 0), -1)
-        cv2.circle(frame, (map_origin_x + seam_len_px, map_origin_y), 5, (0, 0, 255), -1)
-        cv2.putText(frame, "0mm", (map_origin_x - 12, map_origin_y + 24),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 0), 1)
-        cv2.putText(frame, "150mm", (map_origin_x + seam_len_px - 15, map_origin_y + 24),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 100, 255), 1)
-
+        put(frame, f"MINIMAPA DEL CORDON ({cal['target_len']:.0f} mm)", (mm_x0 + 15, mm_y0 + 22), 0.45, (200, 220, 240))
+        ox, oy, sc = mm_x0 + 40, mm_y0 + mm_h // 2 + 5, 1.5
+        Lpx = int(cal["target_len"] * sc)
+        cv2.rectangle(frame, (ox, oy - 12), (ox + Lpx, oy + 12), (50, 60, 75), -1)
+        cv2.line(frame, (ox, oy), (ox + Lpx, oy), (100, 140, 180), 2)
+        cv2.circle(frame, (ox, oy), 5, (0, 255, 0), -1)
+        cv2.circle(frame, (ox + Lpx, oy), 5, (0, 0, 255), -1)
         if tip_pos_mm is not None:
-            # 1. Posición del marcador bruto en el minimapa (Naranja)
-            raw_tx = int(map_origin_x + raw_pos_x * map_scale)
-            raw_ty = int(map_origin_y - raw_pos_y * map_scale)
-            raw_tx = np.clip(raw_tx, mm_x0 + 8, mm_x0 + mm_w - 8)
-            raw_ty = np.clip(raw_ty, mm_y0 + 28, mm_y0 + mm_h - 28)
+            cx_ = int(np.clip(ox + pos_x * sc, mm_x0 + 8, mm_x0 + mm_w - 8))
+            cy_ = int(np.clip(oy - pos_y * sc, mm_y0 + 30, mm_y0 + mm_h - 8))
+            cv2.circle(frame, (cx_, cy_), 7, (0, 255, 120), -1)
 
-            # 2. Posición de la punta corregida en el minimapa (Verde)
-            comp_tx = int(map_origin_x + pos_x * map_scale)
-            comp_ty = int(map_origin_y - pos_y * map_scale)
-            comp_tx = np.clip(comp_tx, mm_x0 + 8, mm_x0 + mm_w - 8)
-            comp_ty = np.clip(comp_ty, mm_y0 + 28, mm_y0 + mm_h - 28)
-
-            # Línea conectora entre ambos en el minimapa
-            cv2.line(frame, (raw_tx, raw_ty), (comp_tx, comp_ty), (0, 220, 255), 1)
-
-            # Dibujar Marcador Bruto
-            cv2.circle(frame, (raw_tx, raw_ty), 6, (0, 165, 255), -1)
-            cv2.circle(frame, (raw_tx, raw_ty), 9, (0, 165, 255), 1)
-
-            # Dibujar Punta Corregida
-            cv2.circle(frame, (comp_tx, comp_ty), 7, (0, 255, 120), -1)
-            cv2.circle(frame, (comp_tx, comp_ty), 11, (0, 255, 120), 2)
-
-        # Leyenda de los dos puntos
-        cv2.circle(frame, (mm_x0 + 20, mm_y0 + mm_h - 14), 5, (0, 165, 255), -1)
-        cv2.putText(frame, "Marcador bruto", (mm_x0 + 30, mm_y0 + mm_h - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (200, 200, 200), 1)
-        cv2.circle(frame, (mm_x0 + 175, mm_y0 + mm_h - 14), 5, (0, 255, 120), -1)
-        cv2.putText(frame, "Punta corregida", (mm_x0 + 185, mm_y0 + mm_h - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (200, 200, 200), 1)
-
-        # ----------------------------------------------------------------------
-        # HUD EN PANTALLA (IZQUIERDA)
-        # ----------------------------------------------------------------------
+        # HUD
         overlay = frame.copy()
-        cv2.rectangle(overlay, (20, 20), (510, 310), (15, 18, 24), -1)
-        cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
-        cv2.rectangle(frame, (20, 20), (510, 310), (60, 70, 90), 1)
-
-        cv2.putText(frame, "ArcSim VR - Seguimiento en Mesa A4", (35, 48),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.60, (255, 255, 255), 2)
-        cv2.putText(frame, f"FPS: {current_fps:.0f}", (420, 48),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
-
-        n_table = len(visible_table_ids)
-        c_table = (0, 255, 0) if n_table >= 2 else (0, 160, 255) if n_table >= 1 else (0, 0, 200)
-        cv2.putText(frame, f"Mesa: {n_table}/4 marcadores visibles {visible_table_ids}", (35, 78),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, c_table, 1)
-
-        c_tool = (255, 255, 0) if pos_tool_px is not None else (0, 0, 200)
-        cv2.putText(frame, f"Herramienta: {'DETECTADA' if pos_tool_px is not None else 'BUSCANDO...'}", (35, 102),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, c_tool, 1)
-
-        # Estado de la Calibración de 2 Puntos
-        if calib_start_pt is None:
-            cv2.putText(frame, "PASO 1: Punta en INICIO -> Presiona [ESPACIO]", (35, 126),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 180, 255), 1)
-        elif calib_end_pt is None:
-            cv2.putText(frame, "PASO 2: Punta en FINAL de linea -> Presiona [F]", (35, 126),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 255, 255), 1)
+        cv2.rectangle(overlay, (20, 20), (560, 300), (15, 18, 24), -1)
+        cv2.addWeighted(overlay, 0.70, frame, 0.30, 0, frame)
+        cv2.rectangle(frame, (20, 20), (560, 300), (60, 70, 90), 1)
+        put(frame, "ArcSim VR - Seguimiento 6D de la punta", (35, 48), 0.6, (255, 255, 255), 2)
+        put(frame, f"FPS: {current_fps:.0f}", (480, 48), 0.45, (180, 180, 180))
+        n_t = len(visible_table_ids)
+        put(frame, f"Mesa: {n_t}/4 marcadores | Camara: "
+                   f"{('f=%.0f px, ' % K[0, 0]) if K is not None else ''}{cam_src}", (35, 76), 0.44,
+            (0, 255, 0) if n_t >= 2 else (0, 0, 220))
+        put(frame, f"Herramienta: {'DETECTADA' if tool_corners is not None else 'BUSCANDO...'}", (35, 98), 0.46,
+            (255, 255, 0) if tool_corners is not None else (0, 0, 220))
+        if cal["p_tip"] is None:
+            put(frame, "PIVOTE PENDIENTE: punta apoyada en la hoja -> [P]", (35, 122), 0.5, (0, 180, 255), 2)
         else:
-            seam_vec = calib_end_pt - calib_start_pt
-            s_len = float(np.linalg.norm(seam_vec))
-            s_fac = (seam_len_target_mm / s_len) if s_len > 1.0 else 1.0
-            cv2.putText(frame, f"CALIBRADA: Real {s_len:.0f}mm -> Godot 150mm (x{s_fac:.2f})", (35, 126),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 255, 120), 1)
-
+            mode = tracker.mode if tracker is not None else "-"
+            put(frame, f"Pivote OK: punta a {np.linalg.norm(cal['p_tip']):.0f} mm del marcador, residuo "
+                       f"{cal['pivot_rms_mm'] or 0:.1f} mm [{mode}]", (35, 122), 0.44, (0, 255, 120))
         if tip_pos_mm is not None:
-            status_cordon = "SOBRE EL CORDÓN" if (0 <= pos_x <= seam_len_target_mm and abs(pos_y) < 15) else "FUERA DE JUNTA"
-            color_cordon = (0, 255, 0) if status_cordon == "SOBRE EL CORDÓN" else (180, 180, 180)
-
-            # Punta compensada 3D
-            cv2.putText(frame, f"Punta Compensada: {pos_x:+5.1f} / {seam_len_target_mm:.0f} mm", (35, 150),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 255, 120), 2)
-            cv2.putText(frame, f"Desvío Lateral:   {pos_y:+5.1f} mm  [{status_cordon}]", (35, 172),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, color_cordon, 1)
-
-            # Marcador bruto vs compensación
-            if has_imu:
-                cv2.putText(frame, f"Marcador Bruto:   {raw_pos_x:+5.1f} mm | Desv: {raw_pos_y:+5.1f} mm", (35, 194),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 0), 1)
-                cv2.putText(frame, f"IMU [{imu_source_str}]: Pitch {latest_pitch:+4.1f}° | Roll {latest_roll:+4.1f}° (Comp dX:{-lever_dx:+4.1f}mm)", (35, 216),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 220, 255), 1)
-            else:
-                cv2.putText(frame, "IMU: Buscando señal... (Conecta el ESP32 por USB)", (35, 216),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (140, 150, 160), 1)
-
-            cv2.putText(frame, f"Brazo Palanca L:  {tip_lever_mm:.0f} mm  [Teclas [ / ] para regular]", (35, 238),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 210, 220), 1)
-
-            if speed_filtered < 0.2:
-                v_col, v_txt = (180, 180, 180), "REPOSO"
-            elif speed_filtered < 1.8:
-                v_col, v_txt = (0, 180, 255), "LENTA"
-            elif speed_filtered <= 4.5:
-                v_col, v_txt = (0, 255, 0), "ÓPTIMA SMAW"
-            else:
-                v_col, v_txt = (0, 0, 255), "MUY RÁPIDA"
-
-            cv2.putText(frame, f"Velocidad: {speed_filtered:4.1f} mm/s  [{v_txt}]", (35, 262),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, v_col, 2)
+            on_seam = 0 <= pos_x <= cal["target_len"] and abs(pos_y) < 15
+            put(frame, f"Punta: {pos_x:+6.1f} / {cal['target_len']:.0f} mm", (35, 150), 0.56, (0, 255, 120), 2)
+            put(frame, f"Desvio lateral: {pos_y:+5.1f} mm  [{'SOBRE EL CORDON' if on_seam else 'FUERA DE JUNTA'}]",
+                (35, 174), 0.48, (0, 255, 0) if on_seam else (180, 180, 180))
+            put(frame, f"Altura de la punta sobre la hoja: {tip3[2]:+5.1f} mm", (35, 198), 0.46, (200, 210, 220))
         else:
-            cv2.putText(frame, "Punta Compensada: --.- mm", (35, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (120, 130, 140), 1)
-            cv2.putText(frame, "Desvío Lateral:   --.- mm", (35, 172), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (120, 130, 140), 1)
-            if has_imu:
-                cv2.putText(frame, f"IMU [{imu_source_str}]: Pitch {latest_pitch:+4.1f}° | Roll {latest_roll:+4.1f}°", (35, 216),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 220, 255), 1)
-            else:
-                cv2.putText(frame, "IMU: Buscando señal... (Conecta el ESP32 por USB)", (35, 216),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (140, 150, 160), 1)
-            cv2.putText(frame, f"Brazo Palanca L:  {tip_lever_mm:.0f} mm  [Teclas [ / ] para regular]", (35, 238), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 210, 220), 1)
-            cv2.putText(frame, "Velocidad: --.- mm/s", (35, 262), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (120, 130, 140), 1)
+            put(frame, "Punta: --", (35, 150), 0.52, (120, 130, 140))
+        if has_imu:
+            put(frame, f"IMU [{imu_source_str}]: Pitch {latest_pitch:+5.1f}  Roll {latest_roll:+5.1f}"
+                       + ("  (fusion activa)" if n_imu is not None else ""), (35, 222), 0.44, (0, 220, 255))
+        else:
+            put(frame, "IMU: sin senal (no hace falta para la posicion)", (35, 222), 0.44, (140, 150, 160))
+        if speed_filtered < 0.2:
+            v_col, v_txt = (180, 180, 180), "REPOSO"
+        elif speed_filtered < 1.8:
+            v_col, v_txt = (0, 180, 255), "LENTA"
+        elif speed_filtered <= 4.5:
+            v_col, v_txt = (0, 255, 0), "OPTIMA SMAW"
+        else:
+            v_col, v_txt = (0, 0, 255), "MUY RAPIDA"
+        put(frame, f"Velocidad: {speed_filtered:4.1f} mm/s  [{v_txt}]", (35, 248), 0.52, v_col, 2)
+        put(frame, "[C] Gyro | [T] Yaw | [P] Pivote | [ESP]/[F] Cordon propio | [R] Cordon plantilla | [Q] Salir",
+            (35, 285), 0.40, (160, 175, 190))
+        if time.time() < cmd_timer and cmd_msg:
+            put(frame, f">>> {cmd_msg}", (35, 322), 0.5, cmd_color, 2)
 
-        cv2.putText(frame, "[ESPACIO]: Inicio  |  [F]: Fin  |  [T]: Tara Yaw  |  [C]: Calib Gyro  |  [ [ / ] ]: L  |  [R]: Reset", (35, 292),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.41, (160, 175, 190), 1)
-
-        # Mensaje de retroalimentación de comandos
-        if time.time() < cmd_status_timer and cmd_status_msg:
-            cv2.putText(frame, f">>> {cmd_status_msg}", (35, 316),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, cmd_status_color, 2)
+        if pivot_active:
+            n_pv = len(pivot_corners)
+            okn = n_pv >= 60
+            oks = pivot_spread[1] >= 5.0
+            cv2.rectangle(frame, (0, fh - 64), (fw, fh), (20, 40, 70), -1)
+            put(frame, f"PIVOTE: punta QUIETA en la hoja; inclina adelante/atras y a los costados.  "
+                       f"Muestras {n_pv} {'OK' if okn else '(min 60)'}", (20, fh - 40), 0.52, (0, 200, 255), 2)
+            put(frame, f"Variacion de angulo: {pivot_spread[0]:.0f} / {pivot_spread[1]:.0f} grados "
+                       f"{'OK' if oks else '(inclina mas en las dos direcciones)'}   ->  [P] para calcular",
+                (20, fh - 14), 0.48, (200, 220, 240))
 
         cv2.imshow("ArcSim_VR - Seguimiento en Mesa de Soldadura", frame)
 
+        # ------------------------------------------------------------------
+        # TECLADO
+        # ------------------------------------------------------------------
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('q') or key == ord('Q') or key == 27:
+        if key in (ord('q'), ord('Q'), 27):
             break
-        elif key == ord('t') or key == ord('T'):
+        elif key in (ord('t'), ord('T')):
             send_esp32_command("RESET_YAW\n", udp_sock, COMMAND_UDP_ADDR)
-            cmd_status_msg = "TARA YAW ENVIADA (Yaw = 0.0° - Rumbo longitudinal alineado)"
-            cmd_status_timer = time.time() + 2.5
-            cmd_status_color = (0, 255, 255)
-            print("\n>>> [TARA] Comando RESET_YAW enviado al ESP32 (Yaw = 0°).")
-        elif key == ord('c') or key == ord('C'):
+            status("TARA YAW ENVIADA (Yaw = 0.0 - rumbo longitudinal alineado)", (0, 255, 255), 2.5)
+            print("\n>>> [TARA] Comando RESET_YAW enviado al ESP32 (Yaw = 0).")
+        elif key in (ord('c'), ord('C')):
+            send_esp32_command('{"cmd":"HAPTIC_MUTE","ms":3500}\n', udp_sock, COMMAND_UDP_ADDR)
             send_esp32_command("CALIBRATE\n", udp_sock, COMMAND_UDP_ADDR)
-            cmd_status_msg = "CALIBRANDO GYRO (¡MANTEN LA HERRAMIENTA QUIETA SOBRE LA MESA!)..."
-            cmd_status_timer = time.time() + 3.0
-            cmd_status_color = (0, 180, 255)
+            status("CALIBRANDO GYRO (MANTEN LA HERRAMIENTA QUIETA SOBRE LA MESA)...", (0, 180, 255), 3.0)
             print("\n>>> [CALIBRACION GYRO] Comando CALIBRATE enviado al ESP32.")
-            print("    ¡MANTEN LA HERRAMIENTA TOTALMENTE INMÓVIL SOBRE LA MESA DURANTE 2 SEGUNDOS!")
-        elif key == ord(']') or key == ord('+'):
-            tip_lever_mm = min(300.0, tip_lever_mm + 5.0)
-            cmd_status_msg = f"Brazo cinemático L: {tip_lever_mm:.0f} mm"
-            cmd_status_timer = time.time() + 1.5
-            cmd_status_color = (0, 255, 120)
-            print(f">>> Brazo cinemático L aumentado a: {tip_lever_mm:.0f} mm")
-        elif key == ord('[') or key == ord('-'):
-            tip_lever_mm = max(20.0, tip_lever_mm - 5.0)
-            cmd_status_msg = f"Brazo cinemático L: {tip_lever_mm:.0f} mm"
-            cmd_status_timer = time.time() + 1.5
-            cmd_status_color = (0, 255, 120)
-            print(f">>> Brazo cinemático L reducido a: {tip_lever_mm:.0f} mm")
+            print("    MANTEN LA HERRAMIENTA TOTALMENTE INMOVIL SOBRE LA MESA DURANTE 2 SEGUNDOS!")
+        elif key in (ord('p'), ord('P')):
+            if not pivot_active:
+                if table_pose is None:
+                    status("PIVOTE: no se ve la mesa (minimo 2 marcadores de la plantilla)", (0, 0, 255))
+                elif tool_corners is None:
+                    status("PIVOTE: no se ve el marcador de la herramienta", (0, 0, 255))
+                else:
+                    pivot_active = True
+                    pivot_corners, pivot_times, pivot_Rs = [], [], []
+                    pivot_spread = (0.0, 0.0)
+                    status("PIVOTE: grabando... punta QUIETA, inclina la herramienta", (0, 200, 255))
+                    print("\n>>> [PIVOTE] Grabando. Punta apoyada y QUIETA sobre la hoja; inclina la")
+                    print("    herramienta adelante/atras y a los costados 5-10 s. [P] para calcular.")
+            else:
+                pivot_active = False
+                print(f"\n>>> [PIVOTE] Calculando con {len(pivot_corners)} muestras...")
+                if ref_table_img is None:
+                    r = {"ok": False, "reason": "no se vio la mesa", "n": 0}
+                else:
+                    r = pivot_calibrate_raw(
+                        pivot_corners, ref_table_img, ref_table_obj, marker_cfg_mm, fw, fh,
+                        K=K if K_reliable else None, dist=dist,
+                        f0=K[0, 0] if K is not None else 0.8 * fw,
+                        sample_times=pivot_times if len(imu_hist) > 20 else None,
+                        imu_history=imu_hist if len(imu_hist) > 20 else None)
+                if r.get("ok"):
+                    cal["p_tip"] = r["p_tip"]
+                    cal["marker_mm_eff"] = r["marker_mm_eff"]
+                    cal["pivot_rms_mm"] = r["rms_mm"]
+                    if not os.path.exists(INTRINSICS_FILE):
+                        cal["focal_px"] = r["focal_px"]
+                        cal["image_size"] = (fw, fh)
+                        K = r["K"]
+                        if not K_reliable:
+                            cam_src = "ajustada en el pivote"
+                        K_reliable = True
+                    fu = r.get("imu")
+                    cal["imu"] = fu if (fu and fu.get("enabled")) else None
+                    tracker = make_tracker()
+                    table_rvec = None          # recalcular la pose de la mesa con la K final
+                    save_calibration(cal)
+                    sp = r.get("spread_deg", [0, 0, 0])
+                    msg = f"PIVOTE OK: residuo {r['rms_mm']:.1f} mm, {r['n_inliers']}/{r['n']} muestras"
+                    print(f"    OK. Punta a {np.linalg.norm(r['p_tip']):.1f} mm del centro del marcador.")
+                    print(f"    Residuo {r['rms_mm']:.2f} mm | muestras usadas {r['n_inliers']}/{r['n']} | "
+                          f"variacion de angulo {sp[0]:.0f}/{sp[1]:.0f} grados")
+                    print(f"    Tamano efectivo del ArUco: {r['marker_mm_eff']:.2f} mm (configurado {marker_cfg_mm:.1f})"
+                          f" | focal {r['focal_px']:.0f} px")
+                    if fu is None:
+                        print("    Fusion con IMU: no (sin datos del IMU durante el pivote). Se usa solo camara.")
+                    elif fu.get("enabled"):
+                        msg += " | fusion IMU activa"
+                        print(f"    Fusion con IMU: ACTIVA (residuo {fu['resid_deg']:.1f} grados, retardo "
+                              f"{fu['delay_s'] * 1000:.0f} ms, residuo del pivote {fu['rms_mm']:.2f} vs "
+                              f"{fu['rms_cam_mm']:.2f} mm solo camara)")
+                    else:
+                        print(f"    Fusion con IMU: no ({fu['reason']}). Se usa solo camara.")
+                    print("    Verifica: punta quieta e inclina -> 'Punta' no debe moverse; z cerca de 0.")
+                    status(msg, (0, 255, 0), 6.0)
+                else:
+                    status(f"PIVOTE RECHAZADO: {r.get('reason', '')}", (0, 0, 255), 7.0)
+                    print(f"    RECHAZADO: {r.get('reason', '')}. Se mantiene la calibracion anterior.")
         elif key == ord(' '):
-            if smoothed_tool_mm is not None:
-                calib_start_pt = smoothed_tool_mm.copy()
-                calib_ref_pitch = latest_pitch
-                calib_ref_roll = latest_roll
-                calib_end_pt = None # resetear fin para forzar paso 2
-                last_sent_pos = None
-                cmd_status_msg = "PASO 1 OK: Inicio (0,0) calibrado. Lleva la punta a FIN y presiona [F]"
-                cmd_status_timer = time.time() + 3.0
-                cmd_status_color = (0, 255, 0)
-                print("\n>>> [PASO 1 OK] Inicio (0,0) calibrado en la punta actual.")
-                print(f"    Orientación de referencia: Pitch {calib_ref_pitch:.1f}°, Roll {calib_ref_roll:.1f}°")
-                print(">>> PASO 2: Lleva la punta al FINAL de tu linea y presiona [F].")
-        elif key == ord('f') or key == ord('F'):
-            if smoothed_tool_mm is not None and calib_start_pt is not None:
-                calib_end_pt = smoothed_tool_mm.copy()
-                last_sent_pos = None
-                save_calibration(calib_start_pt, calib_end_pt, seam_len_target_mm, calib_ref_pitch, calib_ref_roll, tip_lever_mm)
-                cmd_status_msg = "¡CALIBRACIÓN GUARDADA CON ÉXITO!"
-                cmd_status_timer = time.time() + 3.0
-                cmd_status_color = (0, 255, 0)
-            elif calib_start_pt is None:
-                cmd_status_msg = "Primero apoya la punta en INICIO y presiona [ESPACIO]"
-                cmd_status_timer = time.time() + 2.5
-                cmd_status_color = (0, 0, 255)
-                print("\n>>> [AVISO] Primero apoya la punta en el INICIO y presiona [ESPACIO] antes de presionar [F].")
-        elif key == ord('r') or key == ord('R'):
-            calib_start_pt = None
-            calib_end_pt = None
-            last_sent_pos = None
-            if os.path.exists(CALIB_FILE):
-                try: os.remove(CALIB_FILE)
-                except: pass
-            cmd_status_msg = "Calibración reiniciada. Apoya la punta en INICIO y presiona [ESPACIO]"
-            cmd_status_timer = time.time() + 2.5
-            cmd_status_color = (0, 180, 255)
-            print("\n>>> [RESET] Calibracion reiniciada. Apoya la punta en INICIO y presiona [ESPACIO].")
+            if tip3 is not None:
+                pending_seam_start = tip3[:2].copy()
+                status("INICIO del cordon propio fijado. Lleva la punta al FINAL y presiona [F]", (0, 255, 0))
+            else:
+                status("Primero haz el pivote [P] (no hay punta calculada)", (0, 0, 255))
+        elif key in (ord('f'), ord('F')):
+            if tip3 is not None and pending_seam_start is not None and \
+                    np.linalg.norm(tip3[:2] - pending_seam_start) > 10.0:
+                cal["seam_start"] = pending_seam_start
+                cal["seam_end"] = tip3[:2].copy()
+                pending_seam_start = None
+                cal["seam_custom"] = True
+                save_calibration(cal)
+                L_ = float(np.linalg.norm(cal["seam_end"] - cal["seam_start"]))
+                status(f"CORDON PROPIO GUARDADO: {L_:.0f} mm reales -> {cal['target_len']:.0f} mm en Godot", (0, 255, 0))
+            else:
+                status("Primero [ESPACIO] en el INICIO, despues [F] en el FINAL (a mas de 10 mm)", (0, 0, 255))
+        elif key in (ord('r'), ord('R')):
+            d0 = default_calibration()
+            cal["seam_start"], cal["seam_end"], cal["seam_custom"] = d0["seam_start"], d0["seam_end"], False
+            save_calibration(cal)
+            status("Cordon: el de la plantilla (0 a 150 mm)", (0, 180, 255))
 
     stop_serial_thread.set()
     serial_th.join(timeout=1.0)
     cap.release()
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()

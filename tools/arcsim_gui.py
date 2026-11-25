@@ -43,6 +43,7 @@ DEFAULT_CONFIG = {
         "idle": [255, 40, 0],         # Naranja cálido
         "homing": [0, 50, 255],        # Azul eléctrico
         "weld_optimal": [0, 255, 0],   # Verde puro
+        "weld_caution": [255, 170, 0], # Amarillo: algún parámetro en zona tolerable
         "weld_warning": [255, 0, 0],   # Rojo advertencia
         "sticking": [255, 0, 0]        # Rojo intenso pegado
     },
@@ -67,6 +68,7 @@ DEFAULT_CONFIG = {
         "speed_max_mm_s": 4.5          # Velocidad máxima óptima
     },
     "tool_tip_lever_mm": 115.0,        # Brazo cinemático punta a marcador ArUco
+    "homing_required": False,          # True: el arco arranca con el pulsador (homing)
     "godot_executable": ""
 }
 
@@ -350,11 +352,21 @@ class ArcSimControlCenter(tk.Tk):
             presets=[("Verde Puro", [0, 255, 0]), ("Verde Lima", [80, 255, 0]), ("Azul Foco", [0, 150, 255])]
         )
 
+        # 3b. Zona tolerable (amarillo)
+        self._create_state_card(
+            parent,
+            title="3b. Estado PRECAUCIÓN (Cerca del límite)",
+            desc="Distancia, ángulo de trabajo, ángulo de avance o velocidad fuera del rango óptimo pero dentro de la tolerancia del nivel (amarillo en el HUD de Godot).",
+            state_key="weld_caution",
+            has_haptic=False,
+            presets=[("Amarillo", [255, 170, 0]), ("Ámbar", [255, 120, 0]), ("Amarillo Limón", [200, 255, 0])]
+        )
+
         # 4. Estado Advertencia de Técnica
         self._create_state_card(
             parent,
-            title="4. Estado ADVERTENCIA DE TÉCNICA (Arco Largo o Ángulo Incorrecto)",
-            desc="El electrodo se aleja demasiado o los ángulos de avance/trabajo se desvían.",
+            title="4. Estado FUERA DE TOLERANCIA (Rojo)",
+            desc="Algún parámetro (distancia, ángulos o velocidad) superó los límites del nivel.",
             state_key="weld_warning",
             haptic_key="weld_warning",
             haptic_label="Fuerza de vibración pulsante de aviso (%):",
@@ -633,6 +645,20 @@ class ArcSimControlCenter(tk.Tk):
             font=("Segoe UI", 10), fg=C_MUTED, bg=C_BG
         ).pack(anchor="w", padx=12, pady=(8, 14))
 
+        # --- INICIO DEL ARCO (HOMING) ---
+        card_arc = tk.Frame(parent, bg=C_CARD, highlightthickness=1, highlightbackground=C_BORDER)
+        card_arc.pack(fill="x", padx=12, pady=6)
+        tk.Label(card_arc, text="Inicio del Arco", font=("Segoe UI", 11, "bold"), fg=C_TXT, bg=C_CARD).pack(anchor="w", padx=14, pady=(10, 4))
+        self.var_homing = tk.BooleanVar(value=bool(self.config_data.get("homing_required", False)))
+        row_h = tk.Frame(card_arc, bg=C_CARD)
+        row_h.pack(fill="x", padx=14, pady=(0, 12))
+        self.btn_homing = tk.Button(row_h, width=34, font=("Segoe UI", 10, "bold"), relief="flat",
+                                    cursor="hand2", command=self._toggle_homing)
+        self.btn_homing.pack(side="left")
+        self.lbl_homing = tk.Label(row_h, font=("Segoe UI", 9), fg=C_MUTED, bg=C_CARD, justify="left", wraplength=480)
+        self.lbl_homing.pack(side="left", padx=12)
+        self._refresh_homing_widgets()
+
         # --- SECCIÓN LANZADORES ---
         card_launch = tk.Frame(parent, bg=C_CARD, highlightthickness=1, highlightbackground=C_BORDER)
         card_launch.pack(fill="x", padx=12, pady=6)
@@ -698,7 +724,35 @@ class ArcSimControlCenter(tk.Tk):
         ttk.Button(test_row, text="Probar Color LED en Vivo", command=self._test_hardware_led).pack(side="left", padx=5)
 
         # Botón prueba Vibración
-        ttk.Button(test_row, text="Probar Vibración Háptica (2000ms)", command=self._test_hardware_haptic).pack(side="left", padx=5)
+        ttk.Button(test_row, text="Probar Vibración al 100% (2000ms)", command=self._test_hardware_haptic).pack(side="left", padx=5)
+
+    def _refresh_homing_widgets(self):
+        on = self.var_homing.get()
+        if on:
+            self.btn_homing.config(text="HOMING ACTIVADO (pulsador)", bg=C_ORANGE, fg="#111111", activebackground=C_ORANGE)
+            self.lbl_homing.config(text="El arco arranca solo después de apoyar la punta en el inicio del cordón "
+                                        "y presionar el pulsador. Clic para desactivar.")
+        else:
+            self.btn_homing.config(text="HOMING DESACTIVADO (arco automático)", bg=C_GREEN, fg="#111111", activebackground=C_GREEN)
+            r = self.config_data.get("tof_limits_mm", {}).get("reignite_gap", 4.5)
+            self.lbl_homing.config(text=f"El arco se enciende solo cuando la punta se acerca a {r:.1f} mm o menos "
+                                        "de la chapa, sin presionar el pulsador. Clic para activar el homing.")
+
+    def _toggle_homing(self):
+        self.var_homing.set(not self.var_homing.get())
+        self.config_data["homing_required"] = bool(self.var_homing.get())
+        self._refresh_homing_widgets()
+        # Guarda en tools/ y en Godot (Godot relee el archivo solo, en ~1 s) y avisa a la herramienta
+        self.save_config(show_msg=False)
+        msg = json.dumps({"cmd": "SET_HOMING", "enabled": self.config_data["homing_required"]})
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto((msg + "\n").encode("utf-8"), ("127.0.0.1", 4243))
+            sock.close()
+        except Exception:
+            pass
+        estado = "ACTIVADO" if self.config_data["homing_required"] else "DESACTIVADO"
+        self.lbl_save_status.config(text=f"✓ Homing {estado} (guardado y enviado a Godot y a la herramienta)", fg=C_GREEN)
 
     def _refresh_serial_ports(self):
         if HAS_SERIAL:
@@ -782,8 +836,8 @@ class ArcSimControlCenter(tk.Tk):
             messagebox.showwarning("Puerto no seleccionado", "Conecta el ESP32 o selecciona un puerto COM válido.")
             return
 
-        pct = self.config_data["haptic_intensity_pct"].get("weld_optimal", 50)
-        duty = int(pct * 2.55)
+        pct = 100   # prueba al máximo: si así no vibra, el problema es de hardware
+        duty = 255
         cmd_on = json.dumps({"cmd": "SET_HAPTIC", "val": duty, "ms": 2000})
         if self._send_serial_quick(port, cmd_on):
             self.lbl_save_status.config(text=f"⚡ Motor vibrando en vivo al {pct}% durante 2000ms...", fg=C_CYAN)
@@ -813,6 +867,10 @@ class ArcSimControlCenter(tk.Tk):
                 self.serial_conn.write(payload)
                 self.serial_conn.flush()
                 sent_serial = True
+                # Liberar el puerto: si la GUI lo deja abierto, el puente no puede conectarse
+                # al ESP32 y Godot no recibe telemetría ni puede mandar la vibración.
+                time.sleep(0.05)
+                self._close_serial()
             except Exception:
                 # El puerto COM puede estar en uso por el puente serial_bridge
                 self._close_serial()
@@ -889,6 +947,9 @@ class ArcSimControlCenter(tk.Tk):
         btn_reset.pack(side="right", padx=5, pady=12)
 
     def _update_all_widgets_from_data(self):
+        if hasattr(self, "var_homing"):
+            self.var_homing.set(bool(self.config_data.get("homing_required", False)))
+            self._refresh_homing_widgets()
         # Actualizar colores
         for k, swatch in self.color_swatches.items():
             rgb = self.config_data["led_colors"].get(k, [255, 255, 255])

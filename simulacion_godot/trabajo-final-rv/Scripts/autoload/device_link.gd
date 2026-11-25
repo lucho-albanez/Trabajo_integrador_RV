@@ -12,6 +12,7 @@ extends Node
 ##                   campos opcionales de seguimiento de posición: "dx","dy" [mm]
 ##   Godot -> ESP32  {"cmd":"CALIBRATE"} | {"cmd":"RESET_YAW"} | {"cmd":"PING"}
 ##                   {"cmd":"SET_HAPTIC","val":0-255,"m":0|1}
+##                   {"cmd":"SET_LED","r":0-255,"g":0-255,"b":0-255}
 ##
 ## La orientación se expresa como el versor "up" (de la punta al portaelectrodo)
 ## en el marco de la probeta, relativo a una pose neutra calibrada con tare_pose().
@@ -27,6 +28,10 @@ const TIMEOUT_S := 0.5
 const BIND_RETRY_S := 3.0
 const HAPTIC_MIN_INTERVAL_S := 1.0 / 30.0
 const HAPTIC_KEEPALIVE_S := 0.25
+const LED_MIN_INTERVAL_S := 1.0 / 20.0
+const LED_KEEPALIVE_S := 0.2          # el firmware suelta el control a los 500 ms sin mensajes
+const CONFIG_POLL_S := 1.0            # relectura de tool_config.json (cambios desde la GUI)
+const TOOL_CONFIG_PATH := "res://tool_config.json"
 
 # Valores de la simulación por teclado y mouse.
 const SIM_MOUSE_MM_PER_PX := 0.12
@@ -92,20 +97,53 @@ var _sim_travel: Vector2 = Vector2.ZERO
 # Háptica
 var _haptic_last: Array[int] = [-1, -1]
 var _haptic_last_msec: Array[int] = [0, 0]
+var _haptic_armed: bool = false
+
+# Pose neutra recordada (para la tara automática al empezar a soldar)
+const NEUTRAL_POSE_PATH := "user://pose_neutra.json"
+const STILL_DEG_S := 12.0                   # por debajo de esto la herramienta se considera quieta
+var has_neutral: bool = false
+var neutral_gravity: Vector3 = Vector3.ZERO  # vertical vista desde el IMU en la pose neutra
+var tare_count: int = 0                      # aumenta en cada tara (manual o automática)
+var _hw_q_basis: Basis = Basis.IDENTITY      # orientación cruda del IMU
+var _prev_q_basis: Basis = Basis.IDENTITY
+var _motion_deg_s: float = 999.0
+var _still_time: float = 0.0
 
 var tool_config: Dictionary = {}
+
+## true: el arco solo arranca con el homing (punta apoyada + pulsador).
+## false: el arco arranca solo al acercar la punta a la distancia de encendido.
+var homing_required: bool = false
+
+## Colores del LED de la herramienta (tool_config.json -> "led_colors").
+var led_colors: Dictionary = {
+	"weld_optimal": [0, 255, 0],
+	"weld_caution": [255, 170, 0],
+	"weld_warning": [255, 0, 0],
+	"sticking": [255, 0, 0],
+}
+## Intensidad del motor por situación, 0-100 % (tool_config.json -> "haptic_intensity_pct").
+var haptic_pct: Dictionary = {"homing": 78, "weld_optimal": 45, "weld_warning": 60, "sticking": 100}
+
+var _led_last: Array = []
+var _led_last_msec: int = 0
+var _config_mtime: int = 0
+var _config_timer: float = 0.0
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_try_bind()
 	load_tool_config()
+	_load_neutral_pose()
 
 
 func load_tool_config() -> void:
-	var path := "res://tool_config.json"
+	var path := TOOL_CONFIG_PATH
 	if not FileAccess.file_exists(path):
 		return
+	_config_mtime = FileAccess.get_modified_time(path)
 	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
 		return
@@ -117,7 +155,34 @@ func load_tool_config() -> void:
 		print("DeviceLink: Configuracion de herramienta cargada desde tool_config.json")
 
 
+## Relee tool_config.json si cambió (por ejemplo, al tocar el botón de homing en la GUI).
+func _poll_tool_config(delta: float) -> void:
+	_config_timer -= delta
+	if _config_timer > 0.0:
+		return
+	_config_timer = CONFIG_POLL_S
+	if not FileAccess.file_exists(TOOL_CONFIG_PATH):
+		return
+	var mt := FileAccess.get_modified_time(TOOL_CONFIG_PATH)
+	if mt != _config_mtime:
+		var before := homing_required
+		load_tool_config()
+		if before != homing_required:
+			print("DeviceLink: homing %s" % ("ACTIVADO (pulsador)" if homing_required else "DESACTIVADO (arco automático)"))
+
+
 func _apply_tool_config() -> void:
+	if tool_config.has("homing_required"):
+		homing_required = bool(tool_config["homing_required"])
+	if tool_config.has("led_colors") and typeof(tool_config["led_colors"]) == TYPE_DICTIONARY:
+		var lc: Dictionary = tool_config["led_colors"]
+		for k in lc:
+			if typeof(lc[k]) == TYPE_ARRAY and (lc[k] as Array).size() == 3:
+				led_colors[k] = lc[k]
+	if tool_config.has("haptic_intensity_pct") and typeof(tool_config["haptic_intensity_pct"]) == TYPE_DICTIONARY:
+		var hp: Dictionary = tool_config["haptic_intensity_pct"]
+		for k in hp:
+			haptic_pct[k] = float(hp[k])
 	if tool_config.has("tof_limits_mm"):
 		var limits: Dictionary = tool_config["tof_limits_mm"]
 		if limits.has("stick_gap"):
@@ -154,6 +219,8 @@ func _process(delta: float) -> void:
 	_update_tare(delta)
 	_update_sim_keys(delta)
 	_smooth_orientation(delta)
+	_poll_tool_config(delta)
+	_update_stillness(delta)
 
 
 func _input(event: InputEvent) -> void:
@@ -264,15 +331,67 @@ func cycle_input_mode() -> void:
 func tare_pose() -> void:
 	_sim_work_deg = 0.0
 	_sim_travel_deg = 0.0
+	tare_count += 1
 	if _hw_has_orientation:
 		_hw_ref_basis = _hw_basis
 		_hw_up = Vector3.UP
+		_save_neutral_pose()
 	else:
 		_tare_pending = true
 
 
+## Vertical (arriba) vista desde el IMU. Depende solo de la inclinación (pitch/roll, que el
+## acelerómetro mide sin deriva), no del yaw: sirve para reconocer la pose neutra entre sesiones.
+func gravity_imu() -> Vector3:
+	return (_hw_q_basis.transposed() * Vector3(0, 0, 1)).normalized()
+
+
+## Ángulo [°] entre la inclinación actual y la pose neutra recordada (INF si no hay).
+func neutral_tilt_error_deg() -> float:
+	if not has_neutral or not _hw_has_orientation:
+		return INF
+	return rad_to_deg(gravity_imu().angle_to(neutral_gravity))
+
+
+## Segundos que la herramienta lleva quieta.
+func still_time() -> float:
+	return _still_time if hardware_connected else 0.0
+
+
+func _update_stillness(delta: float) -> void:
+	if not _hw_has_orientation or delta <= 0.0:
+		_still_time = 0.0
+		return
+	var d := rad_to_deg((_prev_q_basis.inverse() * _hw_q_basis).get_rotation_quaternion().get_angle())
+	_prev_q_basis = _hw_q_basis
+	_motion_deg_s = lerpf(_motion_deg_s, d / delta, 0.3)
+	_still_time = _still_time + delta if _motion_deg_s < STILL_DEG_S else 0.0
+
+
+func _save_neutral_pose() -> void:
+	neutral_gravity = gravity_imu()
+	has_neutral = true
+	var f := FileAccess.open(NEUTRAL_POSE_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify({"g": [neutral_gravity.x, neutral_gravity.y, neutral_gravity.z]}))
+
+
+func _load_neutral_pose() -> void:
+	if not FileAccess.file_exists(NEUTRAL_POSE_PATH):
+		return
+	var f := FileAccess.open(NEUTRAL_POSE_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var d = JSON.parse_string(f.get_as_text())
+	if typeof(d) == TYPE_DICTIONARY and d.has("g") and (d["g"] as Array).size() == 3:
+		var g: Array = d["g"]
+		neutral_gravity = Vector3(float(g[0]), float(g[1]), float(g[2])).normalized()
+		has_neutral = neutral_gravity.length() > 0.5
+
+
 ## Calibra los offsets del IMU en el ESP32 (herramienta quieta) y retara.
 func calibrate_imu() -> void:
+	send_command({"cmd": "HAPTIC_MUTE", "ms": 3000})
 	send_command({"cmd": "CALIBRATE"})
 	_tare_delay = 1.5
 
@@ -300,7 +419,10 @@ func send_command(cmd: Dictionary) -> void:
 
 
 ## Fija la intensidad (0-255) de un motor. Limita la tasa de envío y evita repeticiones.
-func send_haptic(motor: int, duty: int) -> void:
+## armed: true mientras hay un arco en curso en el ejercicio. Solo entonces el firmware puede
+## vibrar por su cuenta al detectar el electrodo pegado (fuera de eso, el motor queda quieto,
+## por ejemplo al calibrar apoyando la punta).
+func send_haptic(motor: int, duty: int, armed: bool = false) -> void:
 	if motor < 0 or motor >= mini(haptic_motor_count, 2):
 		return
 	if not hardware_connected:
@@ -308,14 +430,43 @@ func send_haptic(motor: int, duty: int) -> void:
 	var d := clampi(duty, 0, 255)
 	var now := Time.get_ticks_msec()
 	var elapsed := (now - _haptic_last_msec[motor]) / 1000.0
-	var changed := d != _haptic_last[motor]
+	var changed := d != _haptic_last[motor] or (motor == 0 and armed != _haptic_armed)
 	if changed and elapsed < HAPTIC_MIN_INTERVAL_S:
 		return
 	if not changed and elapsed < HAPTIC_KEEPALIVE_S:
 		return
 	_haptic_last[motor] = d
 	_haptic_last_msec[motor] = now
-	send_command({"cmd": "SET_HAPTIC", "val": d, "m": motor})
+	if motor == 0:
+		_haptic_armed = armed
+	send_command({"cmd": "SET_HAPTIC", "val": d, "m": motor, "arm": 1 if armed else 0})
+
+
+## Intensidad 0-255 configurada para una situación ("homing", "weld_optimal", "weld_warning", "sticking").
+func haptic_duty(key: String, fallback_pct: float = 50.0) -> int:
+	return clampi(roundi(float(haptic_pct.get(key, fallback_pct)) * 2.55), 0, 255)
+
+
+## Color [r, g, b] configurado para una situación ("weld_optimal", "weld_caution", "weld_warning", "sticking").
+func led_color(key: String) -> Array:
+	var c: Array = led_colors.get(key, [255, 255, 255])
+	return [clampi(int(c[0]), 0, 255), clampi(int(c[1]), 0, 255), clampi(int(c[2]), 0, 255)]
+
+
+## Fija el color del LED de la herramienta. Limita la tasa de envío y repite cada 200 ms.
+func send_led(rgb: Array) -> void:
+	if not hardware_connected or rgb.size() != 3:
+		return
+	var now := Time.get_ticks_msec()
+	var elapsed := (now - _led_last_msec) / 1000.0
+	var changed := rgb != _led_last
+	if changed and elapsed < LED_MIN_INTERVAL_S:
+		return
+	if not changed and elapsed < LED_KEEPALIVE_S:
+		return
+	_led_last = rgb.duplicate()
+	_led_last_msec = now
+	send_command({"cmd": "SET_LED", "r": int(rgb[0]), "g": int(rgb[1]), "b": int(rgb[2])})
 
 
 func stop_haptics() -> void:
@@ -415,6 +566,7 @@ func _apply_quaternion(w: float, x: float, y: float, z: float) -> void:
 	if is_nan(q.length_squared()) or q.length_squared() < 0.5:
 		return
 	q = q.normalized()
+	_hw_q_basis = Basis(q)
 	# Cambio de base IMU -> probeta (rotación propia: det = +1).
 	_hw_basis = imu_to_probe * Basis(q) * imu_to_probe.inverse()
 	if not _hw_has_orientation:

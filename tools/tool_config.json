@@ -24,6 +24,11 @@
       255,
       0,
       0
+    ],
+    "weld_caution": [
+      255,
+      170,
+      0
     ]
   },
   "haptic_intensity_pct": {
@@ -46,6 +51,7 @@
     "speed_min_mm_s": 1.8,
     "speed_max_mm_s": 4.5
   },
-  "tool_tip_lever_mm": 115.0,
-  "godot_executable": ""
+  "tool_tip_lever_mm": 147.1,
+  "godot_executable": "",
+  "homing_required": false
 }

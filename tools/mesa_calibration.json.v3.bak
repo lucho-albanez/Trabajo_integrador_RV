@@ -1,0 +1,17 @@
+{
+  "version": 3,
+  "target_len_mm": 150.0,
+  "tip_lever_mm": 115.0,
+  "tilt_matrix": null,
+  "camera_focal_px": null,
+  "start_pt": [
+    -7.29658620455939,
+    -45.550220082684966
+  ],
+  "end_pt": [
+    138.87173838790753,
+    -54.16481478817374
+  ],
+  "measured_len_mm": 146.42,
+  "scale_factor": 1.0244
+}

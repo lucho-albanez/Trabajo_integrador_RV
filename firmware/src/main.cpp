@@ -123,6 +123,7 @@ struct DynamicConfig {
     uint8_t homing_r = 0, homing_g = 50, homing_b = 255;   // Azul contacto
     uint8_t weld_ok_r = 0, weld_ok_g = 255, weld_ok_b = 0; // Verde óptimo
     uint8_t weld_warn_r = 255, weld_warn_g = 0, weld_warn_b = 0; // Rojo advertencia
+    uint8_t weld_caution_r = 255, weld_caution_g = 170, weld_caution_b = 0; // Amarillo (cerca del limite)
     uint8_t sticking_r = 255, sticking_g = 0, sticking_b = 0;    // Rojo pegado
 
     uint8_t duty_homing = 200;    // ~78%
@@ -135,13 +136,26 @@ struct DynamicConfig {
     float reignite_gap_mm = 4.5f;
     float opt_min_gap_mm = 1.0f;
     float opt_max_gap_mm = 6.0f;
+
+    // true: el arco solo arranca tras apoyar la punta y presionar el pulsador (homing).
+    // false: el arco arranca solo al acercar la punta a la distancia de encendido.
+    bool homing_required = false;
 } g_cfg;
 
 // ==============================================================================
 // TEMPORIZADORES DE OVERRIDE PARA PRUEBAS MANUALES (DESDE GUI O COMANDOS)
 // ==============================================================================
+#define FIRMWARE_VERSION "2026-11-25a"
+
 unsigned long test_override_led_until_ms = 0;
-unsigned long test_override_haptic_until_ms = 0;
+unsigned long test_override_haptic_until_ms = 0;   // prueba manual (GUI / diagnóstico)
+uint8_t test_haptic_duty = 0;
+unsigned long host_haptic_until_ms = 0;            // streaming del simulador (Godot)
+uint8_t host_haptic_duty = 0;
+unsigned long host_armed_until_ms = 0;             // Godot con un arco en curso (ejercicio de soldadura)
+unsigned long haptic_mute_until_ms = 0;            // silencio pedido (calibraciones)
+uint8_t motor_out = 0;                             // duty que realmente sale por el pin (telemetría "h")
+bool motor_pwm_ok = false;
 
 void set_rgb(uint8_t r, uint8_t g, uint8_t b) {
     ledcWrite(PIN_RGB_R, r);
@@ -150,7 +164,10 @@ void set_rgb(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 void set_motor_duty(uint8_t duty) {
-    ledcWrite(PIN_HAPTIC, duty);
+    motor_out = duty;
+    if (!ledcWrite(PIN_HAPTIC, duty)) {
+        motor_pwm_ok = false;
+    }
 }
 
 void apply_led_for_state(SystemState state) {
@@ -181,37 +198,53 @@ void apply_led_for_state(SystemState state) {
     }
 }
 
-void apply_haptic_for_state(SystemState state) {
+// Duty que pide la FSM propia del firmware para el estado actual
+uint8_t local_haptic_duty(SystemState state) {
     unsigned long now = millis();
     unsigned long elapsed = now - state_enter_ms;
     switch (state) {
-        case STATE_IDLE:
-            set_motor_duty(0);
-            break;
         case STATE_HOMING:
-            if (elapsed <= 70) {
-                set_motor_duty(g_cfg.duty_homing);
-            } else {
-                set_motor_duty(0);
-            }
-            break;
+            return (elapsed <= 120) ? g_cfg.duty_homing : 0;
         case STATE_WELD_OK:
-            set_motor_duty(g_cfg.duty_weld_ok);
-            break;
+            return g_cfg.duty_weld_ok;
         case STATE_WELD_WARN:
             if (now - haptic_pattern_ms > (haptic_toggle ? 120 : 90)) {
                 haptic_pattern_ms = now;
                 haptic_toggle = !haptic_toggle;
-                set_motor_duty(haptic_toggle ? g_cfg.duty_weld_warn : 0);
             }
-            break;
+            return haptic_toggle ? g_cfg.duty_weld_warn : 0;
         case STATE_STICKING:
-            set_motor_duty(g_cfg.duty_sticking);
-            break;
-        case STATE_ERROR:
-            set_motor_duty(0);
-            break;
+            return g_cfg.duty_sticking;
+        default:
+            return 0;
     }
+}
+
+// Prioridad del motor:
+//   1. Prueba manual (GUI / diagnóstico) mientras dure.
+//   2. Electrodo pegado detectado por el propio firmware (pulsador o ToF): siempre vibra, aunque
+//      Godot no mande nada o mande 0 (así funcionaba antes y no depende de la PC).
+//   3. Simulador (Godot) mientras siga mandando SET_HAPTIC.
+//   4. FSM propia del firmware (sin Godot abierto).
+void apply_motor() {
+    unsigned long now = millis();
+    uint8_t duty;
+    if (now < test_override_haptic_until_ms) {
+        duty = test_haptic_duty;                       // prueba manual (GUI / diagnóstico)
+    } else if (now < haptic_mute_until_ms) {
+        duty = 0;                                      // calibración en curso: motor quieto
+    } else if (now < host_armed_until_ms) {
+        // Soldando en Godot con el arco encendido: manda Godot y, si el firmware detecta el
+        // electrodo pegado (pulsador o ToF), vibra al máximo sin esperar a la PC.
+        duty = (current_state == STATE_STICKING) ? max(g_cfg.duty_sticking, host_haptic_duty) : host_haptic_duty;
+    } else if (now < host_haptic_until_ms) {
+        duty = host_haptic_duty;                       // Godot abierto pero sin arco (normalmente 0)
+    } else {
+        // Sin simulación activa (calibración de pivote, menú, Godot cerrado): el motor no vibra.
+        // Antes la FSM local vibraba al apoyar la punta (pulsador = "pegado") y molestaba al calibrar.
+        duty = 0;
+    }
+    if (duty != motor_out) set_motor_duty(duty);
 }
 
 void apply_actuators_for_state(SystemState state) {
@@ -219,9 +252,7 @@ void apply_actuators_for_state(SystemState state) {
     if (now >= test_override_led_until_ms) {
         apply_led_for_state(state);
     }
-    if (now >= test_override_haptic_until_ms) {
-        apply_haptic_for_state(state);
-    }
+    apply_motor();
 }
 
 void set_state(SystemState new_state) {
@@ -249,6 +280,9 @@ void set_dlpf(uint8_t mode) {
 }
 
 void calibrate_gyro() {
+    // La vibración del motor arruina el promedio del giroscopio: apagarlo antes de medir.
+    set_motor_duty(0);
+    delay(150);
     digitalWrite(PIN_STATUS_LED, HIGH);
     set_rgb(0, 0, 255); // Azul durante calibración
     float sx = 0, sy = 0, sz = 0;
@@ -276,6 +310,7 @@ void calibrate_gyro() {
     digitalWrite(PIN_STATUS_LED, LOW);
     last_imu_time_micros = micros();
     yaw = 0.0f;
+    haptic_mute_until_ms = millis() + 1000;
 }
 
 void euler_to_quaternion(float r_rad, float p_rad, float y_rad) {
@@ -464,9 +499,17 @@ void update_button() {
 // EVALUACIÓN DE LA FÍSICA Y TRANSICIÓN DE ESTADOS SMAW
 // ==============================================================================
 void evaluate_fsm() {
-    // Si la sesión no está activa (aún no se hizo homing inicial), permanecemos en IDLE
+    // Si la sesión no está activa (aún no se hizo homing inicial), permanecemos en IDLE,
+    // salvo que el homing esté desactivado: entonces el arco arranca solo al acercar la punta.
     if (!session_active) {
-        set_state(STATE_IDLE);
+        if (!g_cfg.homing_required && tof_online &&
+            current_distance_mm > g_cfg.stick_gap_mm && current_distance_mm <= g_cfg.reignite_gap_mm) {
+            session_active = true;
+            arc_active = true;
+            set_state(STATE_HOMING);   // pulso corto de "cebado" y pasa a soldadura
+        } else {
+            set_state(STATE_IDLE);
+        }
         return;
     }
 
@@ -535,8 +578,8 @@ void evaluate_fsm() {
 // ==============================================================================
 void send_telemetry() {
     // Formato estándar compatible directo con DeviceLink (Godot)
-    Serial.printf("{\"qw\":%.4f,\"qx\":%.4f,\"qy\":%.4f,\"qz\":%.4f,\"d\":%.1f,\"b\":%d,\"r\":%.1f,\"p\":%.1f,\"y\":%.1f,\"st\":%d,\"dlpf\":%d}\n",
-                  qw, qx, qy, qz, current_distance_mm, button_state_telemetry, roll, pitch, yaw, current_state, dlpf_mode);
+    Serial.printf("{\"qw\":%.4f,\"qx\":%.4f,\"qy\":%.4f,\"qz\":%.4f,\"d\":%.1f,\"b\":%d,\"r\":%.1f,\"p\":%.1f,\"y\":%.1f,\"st\":%d,\"dlpf\":%d,\"h\":%d}\n",
+                  qw, qx, qy, qz, current_distance_mm, button_state_telemetry, roll, pitch, yaw, current_state, dlpf_mode, motor_out);
 }
 
 // ==============================================================================
@@ -578,74 +621,175 @@ static void extract_rgb(const String& s, const char* key, uint8_t& r, uint8_t& g
 // ==============================================================================
 // PARSER DE COMANDOS ENTRANTE DESDE GODOT / CONSOLA / GUI
 // ==============================================================================
-void handle_serial_commands() {
-    if (!Serial.available()) return;
+// Devuelve el texto del objeto JSON que sigue a `key` ("{...}", con llaves balanceadas) o "".
+// Sirve para buscar "homing" dentro de "haptic_intensity_pct" y no dentro de "led_colors",
+// que también tiene una clave "homing".
+static String extract_section(const String& s, const char* key) {
+    int idx = s.indexOf(key);
+    if (idx < 0) return String("");
+    int start = s.indexOf('{', idx);
+    if (start < 0) return String("");
+    int depth = 0;
+    for (int i = start; i < (int)s.length(); i++) {
+        char c = s[i];
+        if (c == '{') depth++;
+        else if (c == '}') {
+            depth--;
+            if (depth == 0) return s.substring(start, i + 1);
+        }
+    }
+    return String("");
+}
 
-    String line = Serial.readStringUntil('\n');
+static String extract_cmd(const String& s) {
+    int idx = s.indexOf("\"cmd\"");
+    if (idx < 0) return String("");
+    int colon = s.indexOf(':', idx);
+    int q1 = s.indexOf('"', colon + 1);
+    int q2 = s.indexOf('"', q1 + 1);
+    if (colon < 0 || q1 < 0 || q2 < 0) return String("");
+    return s.substring(q1 + 1, q2);
+}
+
+static bool extract_bool(const String& s, const char* key, bool def_val) {
+    int idx = s.indexOf(key);
+    if (idx < 0) return def_val;
+    int colon = s.indexOf(':', idx);
+    if (colon < 0) return def_val;
+    String v = s.substring(colon + 1, colon + 8);
+    v.trim();
+    if (v.startsWith("true") || v.startsWith("1")) return true;
+    if (v.startsWith("false") || v.startsWith("0")) return false;
+    return def_val;
+}
+
+// Ventana durante la cual manda el simulador (Godot reenvía cada <= 250 ms). Si Godot deja de
+// enviar, a los 500 ms el firmware vuelve a manejar el LED y el motor con su propia FSM.
+#define HOST_CONTROL_WINDOW_MS 500
+
+static void apply_config(const String& line) {
+    String led = extract_section(line, "\"led_colors\"");
+    if (led.length() > 0) {
+        extract_rgb(led, "\"idle\"", g_cfg.idle_r, g_cfg.idle_g, g_cfg.idle_b);
+        extract_rgb(led, "\"homing\"", g_cfg.homing_r, g_cfg.homing_g, g_cfg.homing_b);
+        extract_rgb(led, "\"weld_optimal\"", g_cfg.weld_ok_r, g_cfg.weld_ok_g, g_cfg.weld_ok_b);
+        extract_rgb(led, "\"weld_caution\"", g_cfg.weld_caution_r, g_cfg.weld_caution_g, g_cfg.weld_caution_b);
+        extract_rgb(led, "\"weld_warning\"", g_cfg.weld_warn_r, g_cfg.weld_warn_g, g_cfg.weld_warn_b);
+        extract_rgb(led, "\"sticking\"", g_cfg.sticking_r, g_cfg.sticking_g, g_cfg.sticking_b);
+    }
+
+    String tof = extract_section(line, "\"tof_limits_mm\"");
+    if (tof.length() > 0) {
+        g_cfg.stick_gap_mm = extract_float(tof, "\"stick_gap\"", g_cfg.stick_gap_mm);
+        g_cfg.extinguish_gap_mm = extract_float(tof, "\"extinguish_gap\"", g_cfg.extinguish_gap_mm);
+        g_cfg.reignite_gap_mm = extract_float(tof, "\"reignite_gap\"", g_cfg.reignite_gap_mm);
+        g_cfg.opt_min_gap_mm = extract_float(tof, "\"optimal_min\"", g_cfg.opt_min_gap_mm);
+        g_cfg.opt_max_gap_mm = extract_float(tof, "\"optimal_max\"", g_cfg.opt_max_gap_mm);
+    }
+
+    // Antes se buscaba "homing", "sticking"... en TODO el mensaje y se encontraba primero la
+    // clave de led_colors ("[0, 50, 255]" -> toInt() = 0): todas las intensidades quedaban en 0
+    // y el motor nunca vibraba. Ahora se busca solo dentro de "haptic_intensity_pct".
+    String hap = extract_section(line, "\"haptic_intensity_pct\"");
+    if (hap.length() > 0) {
+        int v;
+        v = extract_int(hap, "\"homing\"", -1);       if (v >= 0) g_cfg.duty_homing = (uint8_t)(constrain(v, 0, 100) * 2.55f);
+        v = extract_int(hap, "\"weld_optimal\"", -1); if (v >= 0) g_cfg.duty_weld_ok = (uint8_t)(constrain(v, 0, 100) * 2.55f);
+        v = extract_int(hap, "\"weld_warning\"", -1); if (v >= 0) g_cfg.duty_weld_warn = (uint8_t)(constrain(v, 0, 100) * 2.55f);
+        v = extract_int(hap, "\"sticking\"", -1);     if (v >= 0) g_cfg.duty_sticking = (uint8_t)(constrain(v, 0, 100) * 2.55f);
+    }
+
+    if (line.indexOf("\"homing_required\"") >= 0) {
+        g_cfg.homing_required = extract_bool(line, "\"homing_required\"", g_cfg.homing_required);
+    }
+
+    Serial.printf("{\"ack\":\"CONFIG_APPLIED\",\"duty\":[%d,%d,%d,%d],\"homing_required\":%d}\n",
+                  g_cfg.duty_homing, g_cfg.duty_weld_ok, g_cfg.duty_weld_warn, g_cfg.duty_sticking,
+                  g_cfg.homing_required ? 1 : 0);
+}
+
+static void handle_command_line(String line) {
     line.trim();
+    if (line.length() == 0) return;
+    String cmd = extract_cmd(line);
+    unsigned long now = millis();
 
-    if (line.indexOf("CALIBRATE") >= 0 || line == "c" || line == "C") {
+    // Comandos de una letra desde un monitor serie
+    if (cmd.length() == 0) {
+        if (line == "c" || line == "C" || line == "CALIBRATE") { calibrate_gyro(); return; }
+        if (line == "t" || line == "T" || line == "RESET_YAW") { yaw = 0.0f; return; }
+        if (line.length() == 1 && line[0] >= '0' && line[0] <= '6') { set_dlpf(line[0] - '0'); return; }
+        return;
+    }
+
+    if (cmd == "CALIBRATE") {
         calibrate_gyro();
-    } else if (line.indexOf("RESET_YAW") >= 0 || line == "t" || line == "T") {
+    } else if (cmd == "RESET_YAW") {
         yaw = 0.0f;
-    } else if (line.length() == 1 && line[0] >= '0' && line[0] <= '6') {
-        set_dlpf(line[0] - '0');
-    } else if (line.indexOf("TEST_ACTUATOR") >= 0) {
+    } else if (cmd == "PING") {
+        Serial.printf("{\"ack\":\"PONG\",\"fw\":\"%s\",\"pwm_ok\":%d,\"h\":%d,\"duty\":[%d,%d,%d,%d],\"st\":%d,\"session\":%d,\"homing_required\":%d}\n",
+                      FIRMWARE_VERSION, motor_pwm_ok ? 1 : 0, motor_out, g_cfg.duty_homing, g_cfg.duty_weld_ok,
+                      g_cfg.duty_weld_warn, g_cfg.duty_sticking, current_state, session_active ? 1 : 0,
+                      g_cfg.homing_required ? 1 : 0);
+    } else if (cmd == "TEST_ACTUATOR") {
         uint8_t r = (uint8_t)constrain(extract_int(line, "\"r\"", 0), 0, 255);
         uint8_t g = (uint8_t)constrain(extract_int(line, "\"g\"", 0), 0, 255);
         uint8_t b = (uint8_t)constrain(extract_int(line, "\"b\"", 0), 0, 255);
-        int ms = extract_int(line, "\"ms\"", 2500); // Duración de prueba visual en ms (por defecto 2.5 s)
+        int ms = extract_int(line, "\"ms\"", 2500);
         set_rgb(r, g, b);
-        test_override_led_until_ms = millis() + ms;
+        test_override_led_until_ms = now + ms;
         Serial.printf("{\"ack\":\"TEST_ACTUATOR\",\"r\":%d,\"g\":%d,\"b\":%d,\"ms\":%d}\n", r, g, b, ms);
-    } else if (line.indexOf("SET_HAPTIC") >= 0) {
-        int duty = extract_int(line, "\"val\"", 0);
+    } else if (cmd == "SET_LED") {
+        // Color decidido por el simulador según las tolerancias del nivel (verde/amarillo/rojo)
+        uint8_t r = (uint8_t)constrain(extract_int(line, "\"r\"", 0), 0, 255);
+        uint8_t g = (uint8_t)constrain(extract_int(line, "\"g\"", 0), 0, 255);
+        uint8_t b = (uint8_t)constrain(extract_int(line, "\"b\"", 0), 0, 255);
+        set_rgb(r, g, b);
+        test_override_led_until_ms = now + HOST_CONTROL_WINDOW_MS;
+    } else if (cmd == "SET_HAPTIC") {
+        int duty = constrain(extract_int(line, "\"val\"", 0), 0, 255);
         int ms = extract_int(line, "\"ms\"", 0);
         if (ms > 0) {
-            // Comando de prueba explícito desde GUI con temporizador en ms
-            set_motor_duty((uint8_t)constrain(duty, 0, 255));
-            test_override_haptic_until_ms = millis() + ms;
-            Serial.printf("{\"ack\":\"SET_HAPTIC\",\"val\":%d,\"ms\":%d}\n", duty, ms);
+            // Prueba manual desde la GUI / diagnóstico
+            test_haptic_duty = (uint8_t)duty;
+            test_override_haptic_until_ms = now + ms;
+            set_motor_duty((uint8_t)duty);
+            Serial.printf("{\"ack\":\"SET_HAPTIC\",\"val\":%d,\"ms\":%d,\"pwm_ok\":%d}\n", duty, ms, motor_pwm_ok ? 1 : 0);
         } else {
-            // Streaming continuo desde el simulador Godot
-            if (session_active && duty > 0) {
-                set_motor_duty((uint8_t)constrain(duty, 0, 255));
-                test_override_haptic_until_ms = millis() + 150; // ventana activa de 150 ms
+            // Streaming desde Godot (no depende de que el firmware haya visto el homing)
+            host_haptic_duty = (uint8_t)duty;
+            host_haptic_until_ms = now + HOST_CONTROL_WINDOW_MS;
+            if (extract_int(line, "\"arm\"", 0) == 1) {
+                host_armed_until_ms = now + HOST_CONTROL_WINDOW_MS;   // hay un arco en curso
             } else {
-                test_override_haptic_until_ms = 0;
-                set_motor_duty(0);
+                host_armed_until_ms = 0;
             }
         }
-    } else if (line.indexOf("RESET") >= 0 || line.indexOf("END_SESSION") >= 0) {
+    } else if (cmd == "HAPTIC_MUTE") {
+        int ms = constrain(extract_int(line, "\"ms\"", 1000), 0, 30000);
+        haptic_mute_until_ms = now + ms;
+        set_motor_duty(0);
+    } else if (cmd == "SET_HOMING") {
+        g_cfg.homing_required = extract_bool(line, "\"enabled\"", g_cfg.homing_required);
+        Serial.printf("{\"ack\":\"SET_HOMING\",\"homing_required\":%d}\n", g_cfg.homing_required ? 1 : 0);
+    } else if (cmd == "RESET" || cmd == "END_SESSION") {
         session_active = false;
         arc_active = false;
         test_override_haptic_until_ms = 0;
+        host_haptic_until_ms = 0;
         set_motor_duty(0);
         set_state(STATE_IDLE);
         Serial.println("{\"ack\":\"SESSION_RESET\"}");
-    } else if (line.indexOf("CONFIG") >= 0) {
-        extract_rgb(line, "\"idle\"", g_cfg.idle_r, g_cfg.idle_g, g_cfg.idle_b);
-        extract_rgb(line, "\"homing\"", g_cfg.homing_r, g_cfg.homing_g, g_cfg.homing_b);
-        extract_rgb(line, "\"weld_optimal\"", g_cfg.weld_ok_r, g_cfg.weld_ok_g, g_cfg.weld_ok_b);
-        extract_rgb(line, "\"weld_warning\"", g_cfg.weld_warn_r, g_cfg.weld_warn_g, g_cfg.weld_warn_b);
-        extract_rgb(line, "\"sticking\"", g_cfg.sticking_r, g_cfg.sticking_g, g_cfg.sticking_b);
+    } else if (cmd == "CONFIG") {
+        apply_config(line);
+    }
+}
 
-        if (line.indexOf("\"stick_gap\"") >= 0) g_cfg.stick_gap_mm = extract_float(line, "\"stick_gap\"", g_cfg.stick_gap_mm);
-        if (line.indexOf("\"extinguish_gap\"") >= 0) g_cfg.extinguish_gap_mm = extract_float(line, "\"extinguish_gap\"", g_cfg.extinguish_gap_mm);
-        if (line.indexOf("\"reignite_gap\"") >= 0) g_cfg.reignite_gap_mm = extract_float(line, "\"reignite_gap\"", g_cfg.reignite_gap_mm);
-        if (line.indexOf("\"optimal_min\"") >= 0) g_cfg.opt_min_gap_mm = extract_float(line, "\"optimal_min\"", g_cfg.opt_min_gap_mm);
-        if (line.indexOf("\"optimal_max\"") >= 0) g_cfg.opt_max_gap_mm = extract_float(line, "\"optimal_max\"", g_cfg.opt_max_gap_mm);
-
-        int h_hom = extract_int(line, "\"homing\"", -1);
-        if (h_hom >= 0 && line.indexOf("\"haptic_intensity_pct\"") >= 0) g_cfg.duty_homing = (uint8_t)(constrain(h_hom, 0, 100) * 2.55f);
-        int h_weld = extract_int(line, "\"weld_optimal\"", -1);
-        if (h_weld >= 0 && line.indexOf("\"haptic_intensity_pct\"") >= 0) g_cfg.duty_weld_ok = (uint8_t)(constrain(h_weld, 0, 100) * 2.55f);
-        int h_warn = extract_int(line, "\"weld_warning\"", -1);
-        if (h_warn >= 0 && line.indexOf("\"haptic_intensity_pct\"") >= 0) g_cfg.duty_weld_warn = (uint8_t)(constrain(h_warn, 0, 100) * 2.55f);
-        int h_stk = extract_int(line, "\"sticking\"", -1);
-        if (h_stk >= 0 && line.indexOf("\"haptic_intensity_pct\"") >= 0) g_cfg.duty_sticking = (uint8_t)(constrain(h_stk, 0, 100) * 2.55f);
-
-        Serial.println("{\"ack\":\"CONFIG_APPLIED\"}");
+void handle_serial_commands() {
+    // Procesa todas las líneas pendientes (Godot puede mandar LED + motor en el mismo ciclo)
+    for (int n = 0; n < 8 && Serial.available(); n++) {
+        String line = Serial.readStringUntil('\n');
+        handle_command_line(line);
     }
 }
 
@@ -653,8 +797,9 @@ void handle_serial_commands() {
 // SETUP
 // ==============================================================================
 void setup() {
+    Serial.setRxBufferSize(2048);   // el comando CONFIG mide ~700 bytes (el buffer por defecto es 256)
     Serial.begin(115200);
-    Serial.setTimeout(5);
+    Serial.setTimeout(20);
 
     // Pines de salida
     pinMode(PIN_STATUS_LED, OUTPUT);
@@ -663,13 +808,17 @@ void setup() {
     // Pin de entrada del pulsador con Pull-Up interno
     pinMode(PIN_BUTTON, INPUT_PULLUP);
 
-    // PWM para LED RGB (5 kHz)
-    ledcAttach(PIN_RGB_R, PWM_RGB_FREQ, PWM_RGB_RES);
-    ledcAttach(PIN_RGB_G, PWM_RGB_FREQ, PWM_RGB_RES);
-    ledcAttach(PIN_RGB_B, PWM_RGB_FREQ, PWM_RGB_RES);
-
-    // PWM para Motor Háptico (1 kHz)
-    ledcAttach(PIN_HAPTIC, PWM_HAPTIC_FREQ, PWM_HAPTIC_RES);
+    // PWM con canales fijos: los canales LEDC comparten timer de a pares (0-1, 2-3, 4-5...).
+    // El LED usa los canales 0, 1 y 2 (5 kHz) y el motor el 4, con un timer propio a 1 kHz,
+    // para que una frecuencia no le pise la otra.
+    ledcAttachChannel(PIN_RGB_R, PWM_RGB_FREQ, PWM_RGB_RES, 0);
+    ledcAttachChannel(PIN_RGB_G, PWM_RGB_FREQ, PWM_RGB_RES, 1);
+    ledcAttachChannel(PIN_RGB_B, PWM_RGB_FREQ, PWM_RGB_RES, 2);
+    motor_pwm_ok = ledcAttachChannel(PIN_HAPTIC, PWM_HAPTIC_FREQ, PWM_HAPTIC_RES, 4);
+    if (!motor_pwm_ok) {
+        // Respaldo: asignación automática de canal (como el firmware que funcionaba)
+        motor_pwm_ok = ledcAttach(PIN_HAPTIC, PWM_HAPTIC_FREQ, PWM_HAPTIC_RES);
+    }
     set_motor_duty(0);
 
     // Test de bienvenida RGB y háptico rápido
@@ -678,7 +827,9 @@ void setup() {
     set_rgb(0, 0, 255); delay(150);
     set_rgb(0, 0, 0);
 
-    set_motor_duty(180); delay(60);
+    // Prueba de motor al encender: 100 % durante 300 ms (se tiene que sentir; si no se siente,
+    // el problema es de hardware: MOSFET, diodo, alimentación de 5 V o cableado).
+    set_motor_duty(220); delay(250);
     set_motor_duty(0);
 
     // Inicializar I2C a 400 kHz Fast Mode
@@ -709,9 +860,11 @@ void setup() {
     session_active = false;
     arc_active = false;
     test_override_haptic_until_ms = 0;
+    host_haptic_until_ms = 0;
     set_motor_duty(0);
     set_state(STATE_IDLE);
     last_telemetry_ms = millis();
+    Serial.printf("{\"ack\":\"BOOT\",\"fw\":\"%s\",\"pwm_ok\":%d}\n", FIRMWARE_VERSION, motor_pwm_ok ? 1 : 0);
 }
 
 // ==============================================================================

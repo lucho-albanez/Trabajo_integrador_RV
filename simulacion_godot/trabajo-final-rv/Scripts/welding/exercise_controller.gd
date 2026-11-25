@@ -264,10 +264,73 @@ func _run_calibration() -> void:
 	_current_a = float(machine.current_amperage)
 	var tween := player.enter_station(spot)
 	await tween.finished
-	hud.show_message("Sostené la herramienta quieta en posición neutra (perpendicular a la chapa)...", CALIBRATION_TIME_S + 0.5)
-	await get_tree().create_timer(CALIBRATION_TIME_S).timeout
-	DeviceLink.tare_pose()
+	if DeviceLink.uses_hardware() and DeviceLink.hardware_connected:
+		await _wait_for_neutral_pose()
+	else:
+		hud.show_message("Sostené la herramienta quieta en posición neutra (perpendicular a la chapa)...", CALIBRATION_TIME_S + 0.5)
+		await get_tree().create_timer(CALIBRATION_TIME_S).timeout
+		DeviceLink.tare_pose()
 	_begin_welding()
+
+
+## Tara automática robusta: en vez de tarar a los 3 s (con la herramienta quizás acostada sobre
+## la mesa), espera a que el operario la tome y la sostenga quieta en la pose neutra.
+##  - Con una pose neutra recordada (de la última tara): la inclinación tiene que estar a menos
+##    de NEUTRAL_TOL_DEG de esa pose y quieta NEUTRAL_HOLD_S.
+##  - La primera vez (sin pose recordada): tiene que haberse levantado de donde estaba y quedar
+##    quieta NEUTRAL_HOLD_S.
+##  - En cualquier momento se puede tarar a mano con la tecla de recalibrar (T).
+const NEUTRAL_TOL_DEG := 25.0
+const NEUTRAL_HOLD_S := 0.8
+const PICKUP_DEG := 20.0
+## Sin pose recordada: si no se detecta que levantaste la herramienta, se acepta igual la pose
+## en la que está, quieta, después de este tiempo (por si ya la tenías en la mano).
+const NEUTRAL_FIRST_ACCEPT_S := 4.0
+## Tiempo máximo de espera: pasado esto se toma la pose actual y se sigue (nunca se queda trabado).
+const NEUTRAL_TIMEOUT_S := 10.0
+
+func _wait_for_neutral_pose() -> void:
+	var start_g := DeviceLink.gravity_imu()
+	var start_tares := DeviceLink.tare_count
+	var moved := false
+	var msg_timer := 0.0
+	var elapsed := 0.0
+	while true:
+		await get_tree().process_frame
+		var dt := get_process_delta_time()
+		elapsed += dt
+		if DeviceLink.tare_count != start_tares:
+			return                                   # tara manual (T): listo
+		if not DeviceLink.hardware_connected:
+			DeviceLink.tare_pose()
+			return
+		var g := DeviceLink.gravity_imu()
+		if not moved and rad_to_deg(g.angle_to(start_g)) > PICKUP_DEG:
+			moved = true
+		var err := DeviceLink.neutral_tilt_error_deg()
+		var in_pose: bool
+		if DeviceLink.has_neutral:
+			in_pose = err < NEUTRAL_TOL_DEG
+		else:
+			in_pose = moved or elapsed >= NEUTRAL_FIRST_ACCEPT_S
+		var still := DeviceLink.still_time()
+		if in_pose and still >= NEUTRAL_HOLD_S:
+			DeviceLink.tare_pose()
+			hud.show_message("Pose neutra tomada. ¡Listo para soldar!", 2.0)
+			return
+		if elapsed >= NEUTRAL_TIMEOUT_S:
+			DeviceLink.tare_pose()
+			hud.show_message("Pose neutra tomada por tiempo. Si no es la correcta, presioná T en la posición neutra.", 3.0)
+			return
+		msg_timer -= dt
+		if msg_timer <= 0.0:
+			msg_timer = 0.4
+			var txt := "Sostené la herramienta en posición neutra (perpendicular a la chapa)"
+			if DeviceLink.has_neutral and err >= NEUTRAL_TOL_DEG:
+				txt += "\nInclinación: faltan %.0f° para la pose neutra" % (err - NEUTRAL_TOL_DEG)
+			elif in_pose:
+				txt += "\nMantené quieta... %.1f s" % maxf(NEUTRAL_HOLD_S - still, 0.0)
+			hud.show_message(txt + "\n(o presioná T para tarar ahora)  [%d s]" % int(ceil(NEUTRAL_TIMEOUT_S - elapsed)), 0.6)
 
 
 func _begin_welding() -> void:
@@ -289,7 +352,10 @@ func _begin_welding() -> void:
 	DeviceLink.sim_capture = true
 	_set_state(State.WELDING)
 	_place_holder(0.0)
-	hud.show_message("Bajá la careta (Q), apoyá la punta en el inicio del cordón (punto de homing) para iniciar.", 6.0)
+	if DeviceLink.homing_required:
+		hud.show_message("Bajá la careta (Q), apoyá la punta en el inicio del cordón (punto de homing) para iniciar.", 6.0)
+	else:
+		hud.show_message("Bajá la careta (Q) y acercá la punta al inicio del cordón: el arco se enciende solo.", 6.0)
 
 
 func finish_exercise() -> void:
@@ -352,6 +418,7 @@ func _update_calibration_ui() -> void:
 	var gap := DeviceLink.get_arc_gap_mm()
 	var tiles := _guide_tiles(gap)
 	hud.update_guides(tiles)
+	_update_tool_led(tiles)
 	hud.set_guides_title("CALIBRACIÓN: posicioná y orientá la herramienta")
 	hud.update_live("CALIBRACIÓN: posicioná y orientá la herramienta", tiles)
 
@@ -365,6 +432,7 @@ func _update_welding_ui() -> void:
 
 	var tiles := _guide_tiles(gap)
 	hud.update_guides(tiles)
+	_update_tool_led(tiles)
 	hud.set_live_visible(arc.state == ArcSimulator.State.OFF and level.show_color_guides)
 	if arc.state == ArcSimulator.State.OFF:
 		var all_ok: bool = true
@@ -374,8 +442,10 @@ func _update_welding_ui() -> void:
 			if is_pose and int(d["state"]) == 2:
 				all_ok = false
 		if all_ok:
-			hud.set_guides_title("POSICIÓN CORRECTA: podés cebar el arco", Hud.COLOR_OK)
-			hud.update_live("POSICIÓN CORRECTA: podés cebar el arco", tiles)
+			var ready_msg := "POSICIÓN CORRECTA: podés cebar el arco" if DeviceLink.homing_required \
+				else "POSICIÓN CORRECTA: acercá la punta y el arco se enciende solo"
+			hud.set_guides_title(ready_msg, Hud.COLOR_OK)
+			hud.update_live(ready_msg, tiles)
 		else:
 			hud.set_guides_title("PRE-ARCO: corregí la posición hasta ver verde")
 			hud.update_live("PRE-ARCO: corregí la posición hasta ver verde", tiles)
@@ -404,6 +474,25 @@ func _update_welding_ui() -> void:
 		hud.set_prompt("Electrodo agotado - [R] para colocar uno nuevo")
 	else:
 		hud.set_prompt("")
+
+
+## LED de la herramienta con los mismos márgenes que los indicadores del HUD (bandas del nivel):
+## verde = todo óptimo, amarillo = algo en zona tolerable, rojo = algo fuera de límites.
+## Se evalúan distancia, ángulo de trabajo, ángulo de avance y velocidad (esta última solo con
+## arco encendido). Electrodo pegado = color de "sticking".
+func _update_tool_led(tiles: Array) -> void:
+	var worst := 0
+	for t in tiles:
+		var d: Dictionary = t
+		var k: String = d["key"]
+		if k == "gap" or k == "work" or k == "travel" or k == "speed":
+			var st: int = d["state"]
+			if st != 3:
+				worst = maxi(worst, st)
+	var key: String = ["weld_optimal", "weld_caution", "weld_warning"][worst]
+	if state == State.WELDING and arc.state == ArcSimulator.State.STUCK:
+		key = "sticking"
+	DeviceLink.send_led(DeviceLink.led_color(key))
 
 
 ## Estado de un valor frente a una banda: 0 óptimo, 1 tolerable, 2 fuera de límites.
@@ -497,8 +586,16 @@ func _step_welding(delta: float) -> void:
 
 	var trigger := DeviceLink.get_trigger()
 
+	# Sin homing (opción de la GUI): el arco se enciende solo al acercar la punta.
+	arc.auto_strike = not DeviceLink.homing_required and not holder.is_depleted()
+	if not DeviceLink.homing_required and not _homing_done:
+		_homing_done = true
+		_home_up = DeviceLink.get_tool_up().normalized()
+		_home_marker_pos = DeviceLink.hw_abs_pos_mm
+		DeviceLink.consume_travel_mm()
+
 	# ¡HOMING! Al apoyar físicamente la punta en la mesa y pulsar el microswitch
-	if trigger and not _prev_trigger_edge:
+	if DeviceLink.homing_required and trigger and not _prev_trigger_edge and not _homing_done:
 		_homing_done = true
 		_s_mm = 0.0
 		_v_mm = 0.0

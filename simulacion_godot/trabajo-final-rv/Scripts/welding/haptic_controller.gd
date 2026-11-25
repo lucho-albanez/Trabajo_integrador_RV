@@ -33,7 +33,8 @@ func _process(delta: float) -> void:
 		_jitter = randf_range(-8.0, 8.0)
 		_jitter_timer = 0.05
 
-	DeviceLink.send_haptic(0, _arc_duty())
+	# Armado solo con un arco en curso (encendido, pegado o recién cortado)
+	DeviceLink.send_haptic(0, _arc_duty(), _arc.state != ArcSimulator.State.OFF)
 	if DeviceLink.haptic_motor_count > 1:
 		DeviceLink.send_haptic(1, _warning_duty())
 
@@ -42,18 +43,20 @@ func _arc_duty() -> int:
 	match _arc.state:
 		ArcSimulator.State.ARCING:
 			if _arc.time_in_arc < STRIKE_PULSE_S:
-				return 200  # golpe seco de cebado
+				return DeviceLink.haptic_duty("homing", 78)  # golpe seco de cebado
+			var warn := DeviceLink.haptic_duty("weld_warning", 60)
 			match _arc.zone:
 				ArcSimulator.Zone.SHORT:
-					return 150 if fmod(_pulse_time, 0.12) < 0.06 else 40
+					return warn if fmod(_pulse_time, 0.12) < 0.06 else warn / 3
 				ArcSimulator.Zone.LONG:
-					return 120 if fmod(_pulse_time, 0.18) < 0.10 else 0
+					return warn if fmod(_pulse_time, 0.18) < 0.10 else 0
 				_:
-					return int(75.0 + _jitter)  # "ronroneo" parejo del arco óptimo
+					# "ronroneo" parejo del arco óptimo (intensidad configurada en la GUI)
+					return clampi(DeviceLink.haptic_duty("weld_optimal", 45) + int(_jitter), 0, 255)
 		ArcSimulator.State.STUCK:
-			return 255
+			return DeviceLink.haptic_duty("sticking", 100)
 		ArcSimulator.State.OUT:
-			return 180 if _pulse_time < OUT_BUZZ_S else 0
+			return DeviceLink.haptic_duty("weld_warning", 60) if _pulse_time < OUT_BUZZ_S else 0
 	return 0
 
 
