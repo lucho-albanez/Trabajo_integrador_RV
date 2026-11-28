@@ -197,9 +197,11 @@ TOF_WIN_HZ = TOF_CAV_HZ         # v3.8: ventana abierta en todo el largo de la c
 TOF_FLOOR_T = 2.2                   # Espesor del piso del pod (CI queda a ras)
 TOF_FOV_DEG = 25.0                  # Datasheet VL53L0X
 
-# ---- Soporte ArUco superior (sin cambios) -----------------------------------
+# ---- Soporte ArUco superior (placa plana 48x48 mm a 30°) --------------------
 ARUCO_Z = 98.0
-ARUCO_PRISM_LEN_Z = 32.0
+ARUCO_PLATE_W = 48.0
+ARUCO_PLATE_H = 48.0
+ARUCO_TILT_DEG = 30.0
 ARUCO_SCREWS_Z = (77.0, 118.5)
 
 # ---- Tornillos M3 de cierre de las dos mitades (Z, Y) -----------------------
@@ -678,22 +680,48 @@ def build_electrode_rod(exposed_length_mm: float) -> cq.Workplane:
 
 
 # =============================================================================
-# 6. SOPORTE ArUco (sin cambios)
+# 6. SOPORTE DESMONTABLE ArUco CON PLACA CUADRADA 48x48 mm E INCLINACION DE 30°
 # =============================================================================
 def build_aruco_mount() -> cq.Workplane:
-    y0 = HEAD_Y_TOP
+    y0 = HEAD_Y_TOP  # +30.0 mm
+    # Base alargada con 2 orejas exteriores (Z = 73..123 mm, 1 mm libre del guarda-mano en Z=72)
+    # para que los tornillos M3 en Z = 77.0 y Z = 118.5 queden 100% despejados de la placa (Z = 86.0..110.0 mm)
     base = box_xyz(-9.0, 9.0, y0, y0 + 5.0, 73.0, 123.0).edges("|Y").fillet(3.0)
-    stem = box_xyz(-6.0, 6.0, y0 + 4.0, y0 + 18.0, ARUCO_Z - 10.0, ARUCO_Z + 10.0)
 
-    y_b = y0 + 18.0
-    y_t = y_b + 24.0
-    z0_p = ARUCO_Z - ARUCO_PRISM_LEN_Z / 2.0
-    z1_p = ARUCO_Z + ARUCO_PRISM_LEN_Z / 2.0
-    prism = poly_xy([(-28.0, y_b), (28.0, y_b), (18.0, y_t), (-18.0, y_t)], z0_p, z1_p)
-    hollow = poly_xy([(-21.0, y_b + 3.0), (21.0, y_b + 3.0), (13.0, y_t - 3.0), (-13.0, y_t - 3.0)], z0_p + 4.0, z1_p - 4.0)
-    mount = base.union(stem).union(prism).cut(hollow)
+    # Placa cuadrada plana de 48x48 mm con inclinacion frontal de 30°
+    # El vector normal apunta hacia la camara (+Z / +Y): (0, sin(30°), cos(30°))
+    ang = math.radians(ARUCO_TILT_DEG)
+    nx = 0.0
+    ny = math.sin(ang)
+    nz = math.cos(ang)
+
+    # Elevamos el centro a Y = 57.0 mm para que el borde inferior quede en Y = 36.2 mm
+    # (completamente por encima del lomo de la base en Y = 35.0 mm), garantizando
+    # 48.0 mm de altura util plana continua al 100%, ideal para stickers de 46x46 mm.
+    plate_center = (0.0, 57.0, ARUCO_Z)
+    plane = cq.Plane(
+        origin=plate_center,
+        xDir=(1.0, 0.0, 0.0),
+        normal=(nx, ny, nz),
+    )
+    plate = cq.Workplane(plane).rect(ARUCO_PLATE_W, ARUCO_PLATE_H).extrude(-3.5)
+
+    back_plane = cq.Plane(
+        origin=(0.0, plate_center[1] - 3.5 * ny, plate_center[2] - 3.5 * nz),
+        xDir=(1.0, 0.0, 0.0),
+        normal=(nx, ny, nz),
+    )
+
+    # Cuello / pilar de union estructural exclusivamente detras de la placa
+    stem = box_xyz(-8.0, 8.0, y0 + 4.0, plate_center[1], 80.0, 102.0)
+    stem = stem.cut(cq.Workplane(back_plane).rect(100.0, 100.0).extrude(50.0))
+
+    mount = base.union(stem).union(plate)
+
+    # 2 agujeros pasantes M3 en las orejas exteriores (100% cielo abierto desde arriba)
     for az in ARUCO_SCREWS_Z:
         mount = mount.cut(cyl_y(0.0, az, M3_CLEAR_R, y0 - 1.0, y0 + 7.0))
+
     return mount
 
 
@@ -936,7 +964,7 @@ def main() -> None:
     STEP_DIR.mkdir(parents=True, exist_ok=True)
     STL_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("Generando y validando piezas CAD v3.0 (220 mm, motor Ø27, VL53L0X)...")
+    print("Generando y validando piezas CAD finales v3.14 (250 mm, mango Ø54, motor Ø27, soporte ArUco 48x48 a 30°)...")
     right_half, left_half, shell = build_clamshell_halves()
     pod_tof = build_sensor_pod_tof()
     pod_us = build_sensor_pod_hcsr04()
@@ -958,22 +986,24 @@ def main() -> None:
     validate_and_export(rod_100, "04b_electrodo_100mm", lambda s: s.rotate((0, 0, 0), (0, 1, 0), 90))
     validate_and_export(aruco, "05_soporte_aruco", lambda s: s.rotate((0, 0, 0), (1, 0, 0), -90))
 
-    assy = cq.Assembly(name="ArcSim_VR_Portaelectrodo_v3_0")
+    assy = cq.Assembly(name="ArcSim_VR_Portaelectrodo_Final")
     assy.add(right_half, name="01_Carcasa_Derecha", color=cq.Color(0.18, 0.19, 0.21, 1.0))
     assy.add(left_half, name="02_Carcasa_Izquierda", color=cq.Color(0.24, 0.25, 0.28, 1.0))
     assy.add(pod_tof, name="03_Modulo_Sensor_ToF", color=cq.Color(0.85, 0.32, 0.08, 1.0))
     assy.add(rod_60, name="04_Electrodo_60mm", color=cq.Color(0.55, 0.50, 0.45, 1.0))
-    assy.add(aruco, name="05_Soporte_ArUco", color=cq.Color(0.12, 0.45, 0.72, 1.0))
+    assy.add(aruco, name="05_Soporte_ArUco_48x48_30deg", color=cq.Color(0.12, 0.45, 0.72, 1.0))
     assy.export(str(STEP_DIR / "00_ensamble_completo.step"))
+    assy.export(str(STEP_DIR / "00_ensamble_herramienta_final.step"))
     print(f"  [OK] Ensamble completo: {STEP_DIR / '00_ensamble_completo.step'}")
+    print(f"  [OK] Ensamble final:    {STEP_DIR / '00_ensamble_herramienta_final.step'}")
 
     # Ensamble con envolventes de componentes (para revisar en Solid Edge)
-    assy2 = cq.Assembly(name="ArcSim_VR_v3_0_con_componentes")
+    assy2 = cq.Assembly(name="ArcSim_VR_Final_con_componentes")
     assy2.add(right_half, name="01_Carcasa_Derecha", color=cq.Color(0.18, 0.19, 0.21, 0.35))
     assy2.add(left_half, name="02_Carcasa_Izquierda", color=cq.Color(0.24, 0.25, 0.28, 0.35))
     assy2.add(pod_tof, name="03_Modulo_Sensor_ToF", color=cq.Color(0.85, 0.32, 0.08, 0.6))
     assy2.add(rod_60, name="04_Electrodo_60mm", color=cq.Color(0.55, 0.50, 0.45, 1.0))
-    assy2.add(aruco, name="05_Soporte_ArUco", color=cq.Color(0.12, 0.45, 0.72, 0.6))
+    assy2.add(aruco, name="05_Soporte_ArUco_48x48_30deg", color=cq.Color(0.12, 0.45, 0.72, 0.6))
     for nm, (solid, col) in build_components().items():
         assy2.add(solid, name=f"REF_{nm}", color=cq.Color(col[0], col[1], col[2], 1.0))
     assy2.export(str(STEP_DIR / "00b_ensamble_con_componentes.step"))

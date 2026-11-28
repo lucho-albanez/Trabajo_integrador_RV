@@ -21,13 +21,14 @@ Diseño paramétrico generado con **CadQuery / OpenCASCADE** (`generate_holder_c
 ### `step/` (abrir en Solid Edge)
 | Archivo | Contenido |
 |---|---|
-| `00_ensamble_completo.step` | carcasa, pod ToF, varilla 60 mm y soporte ArUco |
-| `00b_ensamble_con_componentes.step` | lo anterior + envolventes de ESP32, ficha USB-C, motor, circuito MOSFET, cables, LED KY-016, MPU6050 y GY-530 |
+| `00_ensamble_herramienta_final.step` | ensamble final completo: carcasa (250 mm, Ø54 mm), pod ToF, varilla 60 mm y soporte ArUco plano 48 × 48 mm a 30° |
+| `00_ensamble_completo.step` | copia idéntica del ensamble completo para compatibilidad |
+| `00b_ensamble_con_componentes.step` | lo anterior + envolventes de ESP32, ficha USB-C, motor, circuito MOSFET, cables, LED RGB, MPU6050 y sensor ToF |
 | `01_carcasa_derecha.step` / `02_carcasa_izquierda.step` | carcasa partida en X = 0 |
-| `03a_modulo_sensor_ToF.step` | pod del VL53L0X |
+| `03a_modulo_sensor_ToF.step` | pod del sensor láser ToF |
 | `03b_modulo_sensor_HCSR04.step` | pod alternativo para HC-SR04 (sin cambios) |
-| `04a_electrodo_60mm.step` / `04b_electrodo_100mm.step` | varillas deslizantes (con VL53L0X usar la de 60 mm) |
-| `05_soporte_aruco.step` | soporte desmontable con 3 caras de 36 × 36 mm |
+| `04a_electrodo_60mm.step` / `04b_electrodo_100mm.step` | varillas deslizantes (usar la de 60 mm) |
+| `05_soporte_aruco.step` | soporte desmontable con placa plana de 48 × 48 mm inclinada a 30° |
 
 Los archivos `.par` y `.asm` de esa carpeta son de la v2.2 y quedaron desactualizados: reimportá los STEP nuevos.
 
